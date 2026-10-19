@@ -1,4 +1,3 @@
-
 import secrets
 from datetime import timedelta
 
@@ -36,6 +35,11 @@ class User(AbstractUser):
         O_POSITIVE = "O+", "O+"
         O_NEGATIVE = "O-", "O-"
 
+    class OTPPurposeChoices(models.TextChoices):
+        EMAIL_VERIFICATION = "email_verification", "Email Verification"
+        PASSWORD_RESET = "password_reset", "Password Reset"
+
+    # User details
     email = models.EmailField(unique=True)
 
     profiles = models.CharField(
@@ -91,70 +95,96 @@ class User(AbstractUser):
         default=StatusChoices.ACTIVE,
     )
 
-    def __str__(self):
-        return self.username
-
-
-class OTP(models.Model):
-
-    class PurposeChoices(models.TextChoices):
-        EMAIL_VERIFICATION = (
-            "email_verification",
-            "Email Verification",
-        )
-        PASSWORD_RESET = (
-            "password_reset",
-            "Password Reset",
-        )
-
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="otps",
+    # OTP details stored in the same User model
+    otp = models.CharField(
+        max_length=6,
+        blank=True,
     )
 
-    otp = models.CharField(max_length=6)
-
-    purpose = models.CharField(
+    otp_purpose = models.CharField(
         max_length=30,
-        choices=PurposeChoices.choices,
+        choices=OTPPurposeChoices.choices,
+        blank=True,
     )
 
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField()
-    is_verified = models.BooleanField(default=False)
+    otp_created_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    otp_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    otp_is_verified = models.BooleanField(default=False)
 
     @classmethod
     def generate_otp(cls, user, purpose):
-        # Remove previous OTPs for the same purpose.
-        cls.objects.filter(
-            user=user,
-            purpose=purpose,
-        ).delete()
+        """Generate a six-digit OTP valid for five minutes."""
 
-        otp_value = f"{secrets.randbelow(1_000_000):06d}"
+        user.otp = f"{secrets.randbelow(1_000_000):06d}"
+        user.otp_purpose = purpose
+        user.otp_created_at = timezone.now()
+        user.otp_expires_at = timezone.now() + timedelta(minutes=5)
+        user.otp_is_verified = False
 
-        return cls.objects.create(
-            user=user,
-            otp=otp_value,
-            purpose=purpose,
-            expires_at=timezone.now() + timedelta(minutes=5),
+        user.save(
+            update_fields=[
+                "otp",
+                "otp_purpose",
+                "otp_created_at",
+                "otp_expires_at",
+                "otp_is_verified",
+            ]
         )
 
-    def verify_otp(self, entered_otp):
-        if self.is_verified:
+        return user.otp
+
+    def verify_otp(self, entered_otp, purpose):
+        """Check OTP, purpose, expiry, and verification status."""
+
+        if not self.otp:
             return False
 
-        if timezone.now() >= self.expires_at:
+        if self.otp_is_verified:
+            return False
+
+        if self.otp_purpose != purpose:
+            return False
+
+        if not self.otp_expires_at:
+            return False
+
+        if timezone.now() >= self.otp_expires_at:
             return False
 
         if self.otp != entered_otp:
             return False
 
-        self.is_verified = True
-        self.save(update_fields=["is_verified"])
+        self.otp_is_verified = True
+        self.save(update_fields=["otp_is_verified"])
 
         return True
 
+    def clear_otp(self):
+        """Remove OTP details after the operation is completed."""
+
+        self.otp = ""
+        self.otp_purpose = ""
+        self.otp_created_at = None
+        self.otp_expires_at = None
+        self.otp_is_verified = False
+
+        self.save(
+            update_fields=[
+                "otp",
+                "otp_purpose",
+                "otp_created_at",
+                "otp_expires_at",
+                "otp_is_verified",
+            ]
+        )
+
     def __str__(self):
-        return f"OTP for {self.user.username} ({self.purpose})"
+        return self.username

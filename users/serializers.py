@@ -1,8 +1,21 @@
-
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from .models import Client
 
 User = get_user_model()
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Client
+        fields = "__all__"
+        read_only_fields = [
+            "id",
+            "created_by",
+            "created_at",
+            "updated_by",
+            "updated_at",
+        ]
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -21,7 +34,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "password",
-            "profiles",
+            "profile",  # Fixed: profile, not profiles
             "date_of_birth",
             "gender",
             "nationality",

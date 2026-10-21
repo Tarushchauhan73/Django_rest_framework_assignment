@@ -1,291 +1,478 @@
 
+import secrets
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
-
+from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import UserSerializer
+from .models import Client
+from .serializers import UserSerializer, ClientSerializer
 from .emails_ytils import send_welcome_email, send_otp_email
+
 
 User = get_user_model()
 
 
-# 1. Create a user and list active users
-class UserListCreateView(APIView):
+# --------------------------------------------------
+# OTP HELPER FUNCTIONS
+# These functions are in views.py, not models.py.
+# --------------------------------------------------
+
+def generate_otp(user, purpose):
+    """
+    Generate a six-digit OTP, store its purpose and
+    expiration time, and save it on the user.
+    """
+    otp = f"{secrets.randbelow(1000000):06d}"
+
+    user.otp = otp
+    user.otp_purpose = purpose
+    user.otp_expires_at = timezone.now() + timedelta(minutes=5)
+
+    user.save(
+        update_fields=["otp", "otp_purpose", "otp_expires_at"]
+    )
+
+    return otp
+
+
+def verify_otp(user, entered_otp, purpose):
+    """
+    Check the OTP, its purpose, and its expiration.
+    """
+    if not user.otp or not user.otp_expires_at:
+        return False
+
+    if user.otp_purpose != purpose:
+        return False
+
+    if timezone.now() >= user.otp_expires_at:
+        return False
+
+    return secrets.compare_digest(user.otp, str(entered_otp))
+
+
+def clear_otp(user):
+    """
+    Remove OTP data after successful verification/use.
+    """
+    user.otp = ""
+    user.otp_purpose = ""
+    user.otp_expires_at = None
+
+    user.save(
+        update_fields=["otp", "otp_purpose", "otp_expires_at"]
+    )
+
+
+# --------------------------------------------------
+# USER LIST AND CREATE
+# GET  /api/users/
+# POST /api/users/
+# --------------------------------------------------
+
+class UserListCreateView(generics.ListCreateAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [AllowAny]
+    pagination_class = PageNumberPagination
+
+
+    def get_queryset(self):
+        return User.objects.filter(status="Active").order_by("id")
+
+    def perform_create(self, serializer):
+        user = serializer.save()
+
+        # Send welcome email after creating the user.
+        send_welcome_email(user)
+
+
+# --------------------------------------------------
+# USER DETAIL, UPDATE AND SOFT DELETE
+# GET    /api/users/<pk>/
+# PUT    /api/users/<pk>/
+# PATCH  /api/users/<pk>/
+# DELETE /api/users/<pk>/
+# --------------------------------------------------
+
+class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
 
-    def get(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-
-        try:
-            send_welcome_email(user)
-        except Exception:
-            pass
-
-        return Response(
-            {
-                "message": "User created successfully.",
-                "user": serializer.data,
-            },
-            status=status.HTTP_201_CREATED,
-        )
-
-
-# 2. Retrieve, update, or soft-delete a user
-class UserDetailView(APIView):
-    serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
-
     def get_queryset(self):
-        return User.objects.all()
-
-    def get(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
+        return User.objects.filter(status="Active")
 
     def perform_destroy(self, instance):
+        # Soft delete: the database record is retained.
         instance.status = "Inactive"
         instance.save(update_fields=["status"])
 
 
-# 3. Login using email and password
+# --------------------------------------------------
+# LOGIN USING EMAIL AND PASSWORD
+# POST /api/login/
+# --------------------------------------------------
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get("email", "").strip()
-        password = request.data.get("password", "")
+        email = request.data.get("email")
+        password = request.data.get("password")
 
         if not email or not password:
             return Response(
-                {"detail": "Email and password are required."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Email and password are required."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        user = User.objects.filter(email__iexact=email).first()
+        user = User.objects.filter(
+            email__iexact=email,
+            status="Active"
+        ).first()
 
-        if (
-            user is None
-            or user.status != "Active"
-            or not user.check_password(password)
-        ):
+        if user is None or not user.check_password(password):
             return Response(
-                {"detail": "Invalid email or password, or inactive account."},
-                status=status.HTTP_401_UNAUTHORIZED,
+                {"error": "Invalid email or password."},
+                status=status.HTTP_401_UNAUTHORIZED
             )
 
         refresh = RefreshToken.for_user(user)
 
-        return Response(
-            {
-                "message": "Login successful.",
-                "user_id": user.id,
-                "email": user.email,
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-            },
-            status=status.HTTP_200_OK,
-        )
+        return Response({
+            "message": "Login successful.",
+            "user_id": user.id,
+            "email": user.email,
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+        }, status=status.HTTP_200_OK)
 
 
-# 4. Send email-verification OTP
+# --------------------------------------------------
+# SEND EMAIL VERIFICATION OTP
+# POST /api/send-otp/
+# Body: {"email": "user@example.com"}
+# --------------------------------------------------
+
 class SendOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get("email", "").strip()
+        email = request.data.get("email")
 
         if not email:
             return Response(
-                {"detail": "Email is required."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Email is required."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         user = User.objects.filter(
             email__iexact=email,
-            status="Active",
+            status="Active"
         ).first()
 
         if user is None:
             return Response(
-                {"detail": "Active user not found."},
-                status=status.HTTP_404_NOT_FOUND,
+                {"error": "Active user not found."},
+                status=status.HTTP_404_NOT_FOUND
             )
 
-        otp_value = User.generate_otp(
+        otp = generate_otp(
             user,
-            User.OTPPurposeChoices.EMAIL_VERIFICATION,
+            User.OTPPurposeChoices.EMAIL_VERIFICATION
         )
 
-        try:
-            send_otp_email(user, otp_value)
-        except Exception:
-            user.clear_otp()
-            return Response(
-                {"detail": "Unable to send OTP email. Check email settings."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        send_otp_email(user.email, otp)
 
         return Response(
-            {"message": "OTP sent successfully. It expires in 5 minutes."},
-            status=status.HTTP_200_OK,
+            {"message": "Verification OTP sent to your email."},
+            status=status.HTTP_200_OK
         )
 
 
-# 5. Verify email-verification OTP
+# --------------------------------------------------
+# VERIFY EMAIL OTP
+# POST /api/verify-otp/
+# Body: {"email": "...", "otp": "123456"}
+# --------------------------------------------------
+
 class VerifyOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get("email", "").strip()
-        entered_otp = request.data.get("otp", "").strip()
+        email = request.data.get("email")
+        entered_otp = request.data.get("otp")
 
         if not email or not entered_otp:
             return Response(
-                {"detail": "Email and OTP are required."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Email and OTP are required."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         user = User.objects.filter(
             email__iexact=email,
-            status="Active",
+            status="Active"
         ).first()
 
         if user is None:
             return Response(
-                {"detail": "Invalid email or OTP."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Active user not found."},
+                status=status.HTTP_404_NOT_FOUND
             )
 
-        is_valid = user.verify_otp(
+        valid = verify_otp(
+            user,
             entered_otp,
-            User.OTPPurposeChoices.EMAIL_VERIFICATION,
+            User.OTPPurposeChoices.EMAIL_VERIFICATION
         )
 
-        if not is_valid:
+        if not valid:
             return Response(
-                {"detail": "Invalid or expired OTP."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Invalid or expired OTP."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        user.clear_otp()
+        clear_otp(user)
+
+        # Mark email as verified if your model uses this field.
+        # This implementation does not add an email_verified field.
 
         return Response(
             {"message": "Email OTP verified successfully."},
-            status=status.HTTP_200_OK,
+            status=status.HTTP_200_OK
         )
 
 
-# 6. Request a password-reset OTP
+# --------------------------------------------------
+# FORGOT PASSWORD: SEND OTP
+# POST /api/forgot-password/
+# Body: {"email": "..."}
+# --------------------------------------------------
+
 class ForgotPasswordView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get("email", "").strip()
+        email = request.data.get("email")
 
         if not email:
             return Response(
-                {"detail": "Email is required."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Email is required."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         user = User.objects.filter(
             email__iexact=email,
-            status="Active",
+            status="Active"
         ).first()
 
-        # Use the same response whether or not the account exists.
+        # Avoid revealing whether an email is registered.
         if user is not None:
-            otp_value = User.generate_otp(
+            otp = generate_otp(
                 user,
-                User.OTPPurposeChoices.PASSWORD_RESET,
+                User.OTPPurposeChoices.PASSWORD_RESET
             )
-
-            try:
-                send_otp_email(user, otp_value)
-            except Exception:
-                user.clear_otp()
-                return Response(
-                    {"detail": "Unable to send reset OTP email."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
+            send_otp_email(user.email, otp)
 
         return Response(
             {
-                "message": (
-                    "If the account exists, a password-reset OTP has been sent."
-                )
+                "message":
+                "If an active account exists, a password reset OTP has been sent."
             },
-            status=status.HTTP_200_OK,
+            status=status.HTTP_200_OK
         )
 
 
-# 7. Reset password using the OTP
+# --------------------------------------------------
+# RESET PASSWORD USING OTP
+# POST /api/reset-password/
+# Body: {
+#   "email": "...",
+#   "otp": "123456",
+#   "new_password": "NewStrongPassword123!"
+# }
+# --------------------------------------------------
+
 class ResetPasswordView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get("email", "").strip()
-        entered_otp = request.data.get("otp", "").strip()
-        new_password = request.data.get("new_password", "")
+        email = request.data.get("email")
+        entered_otp = request.data.get("otp")
+        new_password = request.data.get("new_password")
 
         if not email or not entered_otp or not new_password:
             return Response(
                 {
-                    "detail": (
-                        "Email, OTP, and new_password are required."
-                    )
+                    "error":
+                    "Email, OTP, and new_password are required."
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         if len(new_password) < 8:
             return Response(
-                {"detail": "Password must contain at least 8 characters."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Password must be at least 8 characters long."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         user = User.objects.filter(
             email__iexact=email,
-            status="Active",
+            status="Active"
         ).first()
 
         if user is None:
             return Response(
-                {"detail": "Invalid email or OTP."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Invalid or expired OTP."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        is_valid = user.verify_otp(
+        valid = verify_otp(
+            user,
             entered_otp,
-            User.OTPPurposeChoices.PASSWORD_RESET,
+            User.OTPPurposeChoices.PASSWORD_RESET
         )
 
-        if not is_valid:
+        if not valid:
             return Response(
-                {"detail": "Invalid or expired OTP."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Invalid or expired OTP."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
+        # set_password hashes the password correctly.
         user.set_password(new_password)
         user.save(update_fields=["password"])
 
-        user.clear_otp()
+        clear_otp(user)
 
         return Response(
             {"message": "Password reset successfully."},
-            status=status.HTTP_200_OK,
+            status=status.HTTP_200_OK
         )
+
+
+# --------------------------------------------------
+# CLIENT LIST AND CREATE WITH PAGINATION
+# GET  /api/clients/
+# POST /api/clients/
+# Requires JWT Bearer token
+# --------------------------------------------------
+
+class ClientListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        clients = Client.objects.all().order_by("id")
+
+        paginator = PageNumberPagination()
+        paginator.page_size = 2
+
+        page = paginator.paginate_queryset(clients, request, view=self)
+
+        serializer = ClientSerializer(page, many=True)
+
+        return paginator.get_paginated_response(serializer.data)
+
+    def post(self, request):
+        serializer = ClientSerializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save(
+                created_by=request.user,
+                updated_by=request.user
+            )
+
+            return Response(
+                serializer.data,
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+# --------------------------------------------------
+# CLIENT DETAIL, UPDATE AND DELETE
+# GET    /api/clients/<pk>/
+# PUT    /api/clients/<pk>/
+# PATCH  /api/clients/<pk>/
+# DELETE /api/clients/<pk>/
+# Requires JWT Bearer token
+# --------------------------------------------------
+
+class ClientDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, pk):
+        try:
+            return Client.objects.get(pk=pk)
+        except Client.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        client = self.get_object(pk)
+
+        if client is None:
+            return Response(
+                {"error": "Client not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = ClientSerializer(client)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request, pk):
+        return self.update_client(request, pk, partial=False)
+
+    def patch(self, request, pk):
+        return self.update_client(request, pk, partial=True)
+
+    def update_client(self, request, pk, partial):
+        client = self.get_object(pk)
+
+        if client is None:
+            return Response(
+                {"error": "Client not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = ClientSerializer(
+            client,
+            data=request.data,
+            partial=partial
+        )
+
+        if serializer.is_valid():
+            serializer.save(updated_by=request.user)
+
+            return Response(
+                serializer.data,
+                status=status.HTTP_200_OK
+            )
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    def delete(self, request, pk):
+        client = self.get_object(pk)
+
+        if client is None:
+            return Response(
+                {"error": "Client not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        client.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)

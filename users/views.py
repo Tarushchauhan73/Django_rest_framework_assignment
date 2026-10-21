@@ -78,7 +78,7 @@ def clear_otp(user):
 # POST /api/users/
 # --------------------------------------------------
 
-class UserListCreateView(generics.ListCreateAPIView):
+class UserListCreateView(APIView):
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
     pagination_class = PageNumberPagination
@@ -102,12 +102,43 @@ class UserListCreateView(generics.ListCreateAPIView):
 # DELETE /api/users/<pk>/
 # --------------------------------------------------
 
-class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
+class UserDetailView(APIView):
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
 
-    def get_queryset(self):
-        return User.objects.filter(status="Active")
+    def get(self, request, pk):
+        user = User.objects.filter(id=pk, status="Active").first()
+        if not user:
+            return Response(
+                {"error": "User not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.serializer_class(user)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        user = User.objects.filter(id=pk, status="Active").first()
+        if not user:
+            return Response(
+                {"error": "User not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.serializer_class(user, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        user = User.objects.filter(id=pk, status="Active").first()
+        if not user:
+            return Response(
+                {"error": "User not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        user.status = "Inactive"
+        user.save(update_fields=["status"])
+        return Response({"message": "User deleted successfully."})
 
     def perform_destroy(self, instance):
         # Soft delete: the database record is retained.

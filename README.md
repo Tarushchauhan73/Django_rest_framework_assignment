@@ -46,6 +46,59 @@ django_rest_framework_assignment/
 
 *Note: The email utility filename above matches the name used in the current project. If your file is named `email_utils.py`, update the filename accordingly.*
 
+## Client Management
+
+The Client API provides CRUD operations to manage client records, along with pagination and audit tracking.
+
+### Features
+
+- Create new client records.
+- Retrieve client details.
+- Update existing client information.
+- Delete client records.
+- Paginate client lists with two records per page.
+- Track who created and last updated each client, along with timestamps.
+- Protect client endpoints using JWT authentication.
+
+### Client API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/clients/` | Get all clients with pagination |
+| POST | `/api/clients/` | Create a new client |
+| GET | `/api/clients/<id>/` | Retrieve a client by ID |
+| PUT | `/api/clients/<id>/` | Update a client |
+| PATCH | `/api/clients/<id>/` | Partially update a client |
+| DELETE | `/api/clients/<id>/` | Delete a client |
+
+### Pagination
+
+The Client API returns two records per page.
+
+```text
+GET /api/clients/
+GET /api/clients/?page=2
+```
+
+The paginated response includes `count`, `next`, `previous`, and `results`.
+
+### Audit Tracking
+
+Each client record tracks:
+
+- `created_by` — user who created the record.
+- `created_at` — record creation timestamp.
+- `updated_by` — user who last updated the record.
+- `updated_at` — most recent update timestamp.
+
+### Authentication
+
+Client endpoints require JWT authentication. In Postman, select **Authorization → Bearer Token** and provide a valid access token.
+
+### Technologies
+
+Python, Django, Django REST Framework, SQLite, and Simple JWT.
+
 ## Installation and Setup
 
 ### 1. Clone the repository

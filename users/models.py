@@ -1,7 +1,7 @@
 
-from django.db import models
-from django.contrib.auth.models import AbstractUser
 from django.conf import settings
+from django.contrib.auth.models import AbstractUser
+from django.db import models
 
 
 class User(AbstractUser):
@@ -11,12 +11,13 @@ class User(AbstractUser):
         STANDARD = "Standard", "Standard"
         DEVELOPER = "Developer", "Developer"
         CLIENT = "Client", "Client"
-        HUMAN = "Human"
+        HUMAN_RESOURCE = "Human Resource", "Human Resource"
 
     class GenderChoices(models.TextChoices):
         MALE = "Male", "Male"
         FEMALE = "Female", "Female"
         OTHER = "Other", "Other"
+        PREFER_NOT_TO_SAY = "Prefer not to say", "Prefer not to say"
 
     class BloodGroupChoices(models.TextChoices):
         A_POSITIVE = "A+", "A+"
@@ -36,115 +37,120 @@ class User(AbstractUser):
         EMAIL_VERIFICATION = "email_verification", "Email Verification"
         PASSWORD_RESET = "password_reset", "Password Reset"
 
-    # User details
-    # Email is validated as required in the serializer.
+    # User profile fields
     email = models.EmailField(
         unique=True,
         blank=True,
         null=True
     )
 
-    profile = models.CharField(
-        max_length=20,
+    profiles = models.CharField(
+        max_length=30,
         choices=ProfileChoices.choices,
-        default=ProfileChoices.STANDARD,
-        blank=True
+        blank=True,
+        null=True
     )
 
     date_of_birth = models.DateField(
-        null=True,
-        blank=True
+        blank=True,
+        null=True
     )
 
     gender = models.CharField(
-        max_length=10,
+        max_length=30,
         choices=GenderChoices.choices,
-        blank=True
+        blank=True,
+        null=True
     )
-
 
     nationality = models.CharField(
         max_length=100,
-        blank=True
+        blank=True,
+        null=True
     )
 
     image = models.ImageField(
         upload_to="user_images/",
-        null=True,
-        blank=True
+        blank=True,
+        null=True
     )
 
     blood_group = models.CharField(
         max_length=3,
         choices=BloodGroupChoices.choices,
-        blank=True
+        blank=True,
+        null=True
     )
 
     phone = models.CharField(
         max_length=20,
-        blank=True
+        blank=True,
+        null=True
     )
 
     permanent_address = models.TextField(
-        blank=True
+        blank=True,
+        null=True
     )
 
     current_address = models.TextField(
-        blank=True
+        blank=True,
+        null=True
     )
 
     emergency_contact_name = models.CharField(
         max_length=100,
-        blank=True
+        blank=True,
+        null=True
     )
 
     emergency_contact_number = models.CharField(
         max_length=20,
-        blank=True
+        blank=True,
+        null=True
     )
 
     emergency_contact_relationship = models.CharField(
         max_length=50,
-        blank=True
+        blank=True,
+        null=True
     )
 
     status = models.CharField(
         max_length=10,
         choices=StatusChoices.choices,
-        default=StatusChoices.ACTIVE,
-        blank=True
+        default=StatusChoices.ACTIVE
     )
 
-    # OTP request limit: maximum 3 requests per 12-hour window
-    attempt = models.PositiveIntegerField(
-        default=0
-    )
+    # OTP fields: OTP processing is handled in utils.py/views.py
+    attempt = models.PositiveIntegerField(default=0)
 
     otp_window_started_at = models.DateTimeField(
-        null=True,
-        blank=True
+        blank=True,
+        null=True
     )
 
     blocked_until = models.DateTimeField(
-        null=True,
-        blank=True
+        blank=True,
+        null=True
     )
 
-    # OTP storage only. OTP logic stays in views.py.
     otp = models.CharField(
         max_length=6,
-        blank=True
+        blank=True,
+        default=""
     )
 
     otp_purpose = models.CharField(
         max_length=30,
         choices=OTPPurposeChoices.choices,
-        blank=True
+        blank=True,
+        default=""
     )
 
     otp_expires_at = models.DateTimeField(
-        null=True,
-        blank=True
+        blank=True,
+        null=True
     )
 
     def __str__(self):
@@ -153,7 +159,10 @@ class User(AbstractUser):
 
 class Client(models.Model):
 
-    # Required fields are validated in ClientSerializer.
+    class StatusChoices(models.TextChoices):
+        ACTIVE = "Active", "Active"
+        INACTIVE = "Inactive", "Inactive"
+
     fname = models.CharField(
         max_length=100,
         blank=True
@@ -164,13 +173,6 @@ class Client(models.Model):
         blank=True
     )
 
-    email = models.EmailField(
-        unique=True,
-        blank=True,
-        null=True
-    )
-
-    # Optional client details
     country = models.CharField(
         max_length=100,
         blank=True
@@ -185,13 +187,19 @@ class Client(models.Model):
         blank=True
     )
 
-    status = models.CharField(
-        max_length=20,
-        default="Active",
-        blank=True
+    email = models.EmailField(
+        unique=True,
+        blank=True,
+        null=True
     )
 
-    # Audit tracking
+    status = models.CharField(
+        max_length=10,
+        choices=StatusChoices.choices,
+        default=StatusChoices.ACTIVE
+    )
+
+    # Audit fields
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -200,9 +208,7 @@ class Client(models.Model):
         related_name="clients_created"
     )
 
-    created_at = models.DateTimeField(
-        auto_now_add=True
-    )
+    created_at = models.DateTimeField(auto_now_add=True)
 
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -212,9 +218,7 @@ class Client(models.Model):
         related_name="clients_updated"
     )
 
-    updated_at = models.DateTimeField(
-        auto_now=True
-    )
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.fname} {self.lname}"
+        return f"{self.fname} {self.lname}".strip()

@@ -6,27 +6,26 @@ from django.utils import timezone
 
 
 def generate_otp(user, purpose):
-    """
-    Generate a six-digit OTP, save its purpose and expiry time.
-    """
-    otp = f"{secrets.randbelow(1000000):06d}"
+    """Generate a six-digit OTP valid for five minutes."""
+    otp = f"{secrets.randbelow(1_000_000):06d}"
 
     user.otp = otp
     user.otp_purpose = purpose
     user.otp_expires_at = timezone.now() + timedelta(minutes=5)
 
     user.save(
-        update_fields=["otp", "otp_purpose", "otp_expires_at"]
+        update_fields=[
+            "otp",
+            "otp_purpose",
+            "otp_expires_at",
+        ]
     )
 
     return otp
 
 
 def verify_otp(user, entered_otp, purpose):
-    """
-    Check whether the OTP is correct, valid for the purpose,
-    and not expired.
-    """
+    """Check whether the OTP is correct, unexpired, and for the right purpose."""
     if not user.otp or not user.otp_expires_at:
         return False
 
@@ -40,13 +39,15 @@ def verify_otp(user, entered_otp, purpose):
 
 
 def clear_otp(user):
-    """
-    Clear OTP data after successful verification or password reset.
-    """
+    """Remove the OTP after successful verification."""
     user.otp = ""
     user.otp_purpose = ""
     user.otp_expires_at = None
 
     user.save(
-        update_fields=["otp", "otp_purpose", "otp_expires_at"]
+        update_fields=[
+            "otp",
+            "otp_purpose",
+            "otp_expires_at",
+        ]
     )

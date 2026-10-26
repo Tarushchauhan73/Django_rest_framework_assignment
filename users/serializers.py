@@ -1,4 +1,3 @@
-
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import Client
@@ -7,6 +6,7 @@ User = get_user_model()
 
 
 class ClientSerializer(serializers.ModelSerializer):
+
 
     class Meta:
         model = Client
@@ -18,6 +18,7 @@ class ClientSerializer(serializers.ModelSerializer):
             "updated_by",
             "updated_at",
         ]
+
 
     def validate(self, attrs):
         required_fields = ["fname", "lname", "email"]
@@ -67,7 +68,11 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "password",
+
             "profile",
+
+            "profile",  # Fixed: profile, not profiles
+
             "date_of_birth",
             "gender",
             "nationality",

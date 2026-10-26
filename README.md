@@ -277,6 +277,7 @@ Replace the sample OTP with the code received by email.
 Replace the sample email and OTP with valid values.
 
 ##screenshots 
+
 <img width="1436" height="773" alt="Screenshot 2026-10-15 at 11 25 15 AM" src="https://github.com/user-attachments/assets/87b6be3d-168c-499e-9276-07b24667cf76" />
 <img width="1440" height="773" alt="Screenshot 2026-10-15 at 11 25 30 AM" src="https://github.com/user-attachments/assets/f7865d1f-01ec-482d-adc6-e0635ba233a7" />
 <img width="1440" height="775" alt="Screenshot 2026-10-15 at 11 25 45 AM" src="https://github.com/user-attachments/assets/d9d5f4a1-b170-495d-a2c8-ded731c7f3a5" />
@@ -290,6 +291,7 @@ Replace the sample email and OTP with valid values.
 <img width="1400" height="900" alt="Screenshot 2026-10-15 at 5 47 23 PM" src="https://github.com/user-attachments/assets/100ba884-ae62-477b-9e50-56753f7a7bd9" />
 <img width="1440" height="780" alt="Screenshot 2026-10-15 at 11 25 03 AM" src="https://github.com/user-attachments/assets/511cf133-e052-41f8-837b-df4e4f92a44d" />
 
+![alt text](<Screenshot 2026-10-26 at 9.42.33 AM.png>)
 
 ## Testing the API
 

@@ -1,5 +1,9 @@
 
 
+
+
+import secrets      
+
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -11,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.tokens import RefreshToken
+
 from rest_framework.exceptions import ValidationError
 from .models import Client
 from .serializers import UserSerializer, ClientSerializer
@@ -30,9 +35,25 @@ User = get_user_model()
 # POST /api/users/
 
 
+
+from .models import Client
+from .serializers import UserSerializer, ClientSerializer
+from .emails_ytils import send_welcome_email, send_otp_email
+
+
+User = get_user_model()
+
+
+# USER LIST AND CREATE
+# GET  /api/users/
+# POST /api/users/
+
+
 class UserListCreateView(APIView):
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
+    pagination_class = PageNumberPagination
+
 
     def get(self, request):
         users = User.objects.filter(
@@ -72,6 +93,30 @@ class UserListCreateView(APIView):
 class UserDetailView(APIView):
     serializer_class = UserSerializer
     permission_classes = [AllowAny]
+
+    
+
+    def get_queryset(self):
+        return User.objects.filter(status="Active").order_by("id")
+
+    def perform_create(self, serializer):
+        user = serializer.save()
+
+        # Send welcome email after creating the user.
+        send_welcome_email(user)
+
+
+
+# USER DETAIL, UPDATE AND SOFT DELETE
+# GET    /api/users/<pk>/
+# PUT    /api/users/<pk>/
+# PATCH  /api/users/<pk>/
+
+
+class UserDetailView(APIView):
+    serializer_class = UserSerializer
+    permission_classes = [AllowAny]
+
 
     def get(self, request, pk):
         user = User.objects.filter(id=pk, status="Active").first()
@@ -113,6 +158,12 @@ class UserDetailView(APIView):
         instance.save(update_fields=["status"])
 
 
+
+# LOGIN USING EMAIL AND PASSWORD
+# POST /api/login/
+
+
+
 # LOGIN USING EMAIL AND PASSWORD
 # POST /api/login/
 
@@ -152,7 +203,6 @@ class LoginView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-
 # SEND EMAIL VERIFICATION OTP
 # POST /api/send-otp/
 # Body: {"email": "user@example.com"}
@@ -186,7 +236,11 @@ class SendOTPView(APIView):
             User.OTPPurposeChoices.EMAIL_VERIFICATION
         )
 
+
         send_otp_email(user, otp)
+
+        send_otp_email(user.email, otp)
+
 
         return Response(
             {"message": "Verification OTP sent to your email."},
@@ -248,6 +302,11 @@ class VerifyOTPView(APIView):
 
 
 
+
+# FORGOT PASSWORD: SEND OTP
+# POST /api/forgot-password/
+# Body: {"email": "..."}
+
 # FORGOT PASSWORD: SEND OTP
 # POST /api/forgot-password/
 # Body: {"email": "..."}
@@ -276,7 +335,11 @@ class ForgotPasswordView(APIView):
                 user,
                 User.OTPPurposeChoices.PASSWORD_RESET
             )
+
             send_otp_email(user, otp)
+
+            send_otp_email(user.email, otp)
+
 
         return Response(
             {
@@ -285,6 +348,9 @@ class ForgotPasswordView(APIView):
             },
             status=status.HTTP_200_OK
         )
+
+
+
 
 
 
@@ -356,10 +422,13 @@ class ResetPasswordView(APIView):
 
 
 
+
+
 # CLIENT LIST AND CREATE WITH PAGINATION
 # GET  /api/clients/
 # POST /api/clients/
 # Requires JWT Bearer token
+
 
 
 class ClientListCreateAPIView(APIView):
@@ -404,7 +473,6 @@ class ClientListCreateAPIView(APIView):
 # PATCH  /api/clients/<pk>/
 # DELETE /api/clients/<pk>/
 # Requires JWT Bearer token
-
 
 class ClientDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]

@@ -23,16 +23,16 @@ def send_welcome_email(user):
 
 
 def send_otp_email(user, otp):
-    subject = "Your Account Verification OTP"
+    subject = "Your OTP Verification Code"
 
     message = (
         f"Hello {user.first_name or user.username},\n\n"
-        f"Your verification OTP is: {otp}\n\n"
-        "This OTP expires in 5 minutes.\n"
-        "Do not share it with anyone."
+        f"Your OTP is: {otp}\n\n"
+        "This OTP is valid for 5 minutes.\n\n"
+        "If you did not request this OTP, please ignore this email."
     )
 
-    return send_mail(
+    send_mail(
         subject,
         message,
         settings.DEFAULT_FROM_EMAIL,

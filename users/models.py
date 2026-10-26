@@ -1,9 +1,7 @@
-import secrets
-from datetime import timedelta
 
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from django.utils import timezone
+from django.conf import settings
 
 
 class User(AbstractUser):
@@ -13,17 +11,12 @@ class User(AbstractUser):
         STANDARD = "Standard", "Standard"
         DEVELOPER = "Developer", "Developer"
         CLIENT = "Client", "Client"
-        HUMAN_RESOURCE = "Human Resource", "Human Resource"
-
-    class StatusChoices(models.TextChoices):
-        ACTIVE = "Active", "Active"
-        INACTIVE = "Inactive", "Inactive"
+        HUMAN = "Human"
 
     class GenderChoices(models.TextChoices):
         MALE = "Male", "Male"
         FEMALE = "Female", "Female"
         OTHER = "Other", "Other"
-        PREFER_NOT_TO_SAY = "Prefer not to say", "Prefer not to say"
 
     class BloodGroupChoices(models.TextChoices):
         A_POSITIVE = "A+", "A+"
@@ -35,156 +28,193 @@ class User(AbstractUser):
         O_POSITIVE = "O+", "O+"
         O_NEGATIVE = "O-", "O-"
 
+    class StatusChoices(models.TextChoices):
+        ACTIVE = "Active", "Active"
+        INACTIVE = "Inactive", "Inactive"
+
     class OTPPurposeChoices(models.TextChoices):
         EMAIL_VERIFICATION = "email_verification", "Email Verification"
         PASSWORD_RESET = "password_reset", "Password Reset"
 
     # User details
-    email = models.EmailField(unique=True)
+    # Email is validated as required in the serializer.
+    email = models.EmailField(
+        unique=True,
+        blank=True,
+        null=True
+    )
 
-    profiles = models.CharField(
+    profile = models.CharField(
         max_length=20,
         choices=ProfileChoices.choices,
         default=ProfileChoices.STANDARD,
+        blank=True
     )
 
-    date_of_birth = models.DateField(null=True, blank=True)
+    date_of_birth = models.DateField(
+        null=True,
+        blank=True
+    )
 
     gender = models.CharField(
-        max_length=20,
+        max_length=10,
         choices=GenderChoices.choices,
-        blank=True,
+        blank=True
     )
 
-    nationality = models.CharField(max_length=100, blank=True)
+
+    nationality = models.CharField(
+        max_length=100,
+        blank=True
+    )
 
     image = models.ImageField(
-        upload_to="profile_images/",
+        upload_to="user_images/",
         null=True,
-        blank=True,
+        blank=True
     )
 
     blood_group = models.CharField(
         max_length=3,
         choices=BloodGroupChoices.choices,
-        blank=True,
+        blank=True
     )
 
-    phone = models.CharField(max_length=20, blank=True)
-    permanent_address = models.TextField(blank=True)
-    current_address = models.TextField(blank=True)
+    phone = models.CharField(
+        max_length=20,
+        blank=True
+    )
+
+    permanent_address = models.TextField(
+        blank=True
+    )
+
+    current_address = models.TextField(
+        blank=True
+    )
 
     emergency_contact_name = models.CharField(
         max_length=100,
-        blank=True,
+        blank=True
     )
 
     emergency_contact_number = models.CharField(
         max_length=20,
-        blank=True,
+        blank=True
     )
 
     emergency_contact_relationship = models.CharField(
         max_length=50,
-        blank=True,
+        blank=True
     )
 
     status = models.CharField(
         max_length=10,
         choices=StatusChoices.choices,
         default=StatusChoices.ACTIVE,
+        blank=True
     )
 
-    # OTP details stored in the same User model
+    # OTP request limit: maximum 3 requests per 12-hour window
+    attempt = models.PositiveIntegerField(
+        default=0
+    )
+
+    otp_window_started_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    blocked_until = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    # OTP storage only. OTP logic stays in views.py.
     otp = models.CharField(
         max_length=6,
-        blank=True,
+        blank=True
     )
 
     otp_purpose = models.CharField(
         max_length=30,
         choices=OTPPurposeChoices.choices,
-        blank=True,
-    )
-
-    otp_created_at = models.DateTimeField(
-        null=True,
-        blank=True,
+        blank=True
     )
 
     otp_expires_at = models.DateTimeField(
         null=True,
-        blank=True,
+        blank=True
     )
-
-    otp_is_verified = models.BooleanField(default=False)
-
-    @classmethod
-    def generate_otp(cls, user, purpose):
-        """Generate a six-digit OTP valid for five minutes."""
-
-        user.otp = f"{secrets.randbelow(1_000_000):06d}"
-        user.otp_purpose = purpose
-        user.otp_created_at = timezone.now()
-        user.otp_expires_at = timezone.now() + timedelta(minutes=5)
-        user.otp_is_verified = False
-
-        user.save(
-            update_fields=[
-                "otp",
-                "otp_purpose",
-                "otp_created_at",
-                "otp_expires_at",
-                "otp_is_verified",
-            ]
-        )
-
-        return user.otp
-
-    def verify_otp(self, entered_otp, purpose):
-        """Check OTP, purpose, expiry, and verification status."""
-
-        if not self.otp:
-            return False
-
-        if self.otp_is_verified:
-            return False
-
-        if self.otp_purpose != purpose:
-            return False
-
-        if not self.otp_expires_at:
-            return False
-
-        if timezone.now() >= self.otp_expires_at:
-            return False
-
-        if self.otp != entered_otp:
-            return False
-
-        self.otp_is_verified = True
-        self.save(update_fields=["otp_is_verified"])
-
-        return True
-
-    def clear_otp(self):
-        """Remove OTP details after the operation is completed."""
-
-        self.otp = ""
-        self.otp_purpose = ""
-        self.otp_created_at = None
-        self.otp_expires_at = None
-        self.otp_is_verified = False
-
-        self.save(
-            update_fields=[
-                "otp",
-                "otp_purpose",
-                "otp_created_at",
-                "otp_expires_at",
-                "otp_is_verified",
-            ]
-        )
 
     def __str__(self):
         return self.username
+
+
+class Client(models.Model):
+
+    # Required fields are validated in ClientSerializer.
+    fname = models.CharField(
+        max_length=100,
+        blank=True
+    )
+
+    lname = models.CharField(
+        max_length=100,
+        blank=True
+    )
+
+    email = models.EmailField(
+        unique=True,
+        blank=True,
+        null=True
+    )
+
+    # Optional client details
+    country = models.CharField(
+        max_length=100,
+        blank=True
+    )
+
+    contactno = models.CharField(
+        max_length=20,
+        blank=True
+    )
+
+    address = models.TextField(
+        blank=True
+    )
+
+    status = models.CharField(
+        max_length=20,
+        default="Active",
+        blank=True
+    )
+
+    # Audit tracking
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clients_created"
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clients_updated"
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    def __str__(self):
+        return f"{self.fname} {self.lname}"

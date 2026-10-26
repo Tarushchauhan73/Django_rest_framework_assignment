@@ -129,9 +129,12 @@ EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 AUTH_USER_MODEL = 'users.User'
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        
+    ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 2,
 }
 
 import os
@@ -140,9 +143,9 @@ EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-
-EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
+EMAIL_USE_SSL = False
+EMAIL_HOST_USER = ("tarushchauhan19@gmail.com")
+EMAIL_HOST_PASSWORD = ("xugf webp ljbg azdm")
 
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
  

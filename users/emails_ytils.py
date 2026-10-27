@@ -23,14 +23,8 @@ def send_welcome_email(user):
 
 
 def send_otp_email(user, otp):
-    subject = "Your OTP Verification Code"
-
-    message = (
-        f"Hello {user.first_name or user.username},\n\n"
-        f"Your OTP is: {otp}\n\n"
-        "This OTP is valid for 5 minutes.\n\n"
-        "If you did not request this OTP, please ignore this email."
-    )
+    subject = "Your OTP Code"
+    message = f"Your OTP is {otp}. It expires in 5 minutes."
 
     send_mail(
         subject,

@@ -3,6 +3,7 @@ import secrets
 from datetime import timedelta
 
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 
 def generate_otp(user, purpose):
@@ -49,5 +50,51 @@ def clear_otp(user):
             "otp",
             "otp_purpose",
             "otp_expires_at",
+        ]
+    )
+
+
+def check_otp_request_limit(user):
+    """
+    Allow a maximum of three OTP requests in a 12-hour window.
+    The limit is shared across OTP-sending endpoints.
+    """
+
+    now = timezone.now()
+
+    error_message = (
+        "You have exceeded the maximum number of OTP requests. "
+        "Please try again after 12 hours."
+    )
+
+    # If the user is blocked, reject the request.
+    if user.blocked_until and now < user.blocked_until:
+        raise ValidationError({"detail": error_message})
+
+    # Start a new 12-hour window if the previous window has expired.
+    if (
+        user.otp_window_started_at is None
+        or now >= user.otp_window_started_at + timedelta(hours=12)
+    ):
+        user.attempt = 0
+        user.otp_window_started_at = now
+        user.blocked_until = None
+
+    # If three requests have already been made, block further requests.
+    if user.attempt >= 3:
+        user.blocked_until = now + timedelta(hours=12)
+
+        user.save(update_fields=["blocked_until"])
+
+        raise ValidationError({"detail": error_message})
+
+    # Count this OTP request.
+    user.attempt += 1
+
+    user.save(
+        update_fields=[
+            "attempt",
+            "otp_window_started_at",
+            "blocked_until",
         ]
     )

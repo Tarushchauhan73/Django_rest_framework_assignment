@@ -2,16 +2,23 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from profile import Profile
 
+
+# Dynamic Profile Model
+class Profile(models.Model):
+    name = models.CharField(max_length=50, unique=True)
+    is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(default=False)
+
+    def __str__(self):
+        return self.name
+
+
+
+# Custom User Model
 
 class User(AbstractUser):
-
-    class ProfileChoices(models.TextChoices):
-        ADMINISTRATOR = "Administrator", "Administrator"
-        STANDARD = "Standard", "Standard"
-        DEVELOPER = "Developer", "Developer"
-        CLIENT = "Client", "Client"
-        HUMAN_RESOURCE = "Human Resource", "Human Resource"
 
     class GenderChoices(models.TextChoices):
         MALE = "Male", "Male"
@@ -37,125 +44,120 @@ class User(AbstractUser):
         EMAIL_VERIFICATION = "email_verification", "Email Verification"
         PASSWORD_RESET = "password_reset", "Password Reset"
 
-    # User profile fields
+    # Username is optional and can be NULL.
+    username = models.CharField(
+        max_length=150,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+
     email = models.EmailField(
         unique=True,
         blank=True,
-        null=True
+        null=True,
     )
 
-    profiles = models.CharField(
-        max_length=30,
-        choices=ProfileChoices.choices,
+    # Profiles are configured dynamically in the database.
+    profiles = models.ForeignKey(
+        Profile,
+        on_delete=models.PROTECT,
+        null=True,
         blank=True,
-        null=True
+        related_name="users",
     )
 
-    date_of_birth = models.DateField(
-        blank=True,
-        null=True
-    )
+    date_of_birth = models.DateField(null=True, blank=True)
 
     gender = models.CharField(
         max_length=30,
         choices=GenderChoices.choices,
+        null=True,
         blank=True,
-        null=True
     )
 
     nationality = models.CharField(
         max_length=100,
+        null=True,
         blank=True,
-        null=True
     )
 
     image = models.ImageField(
         upload_to="user_images/",
+        null=True,
         blank=True,
-        null=True
     )
 
     blood_group = models.CharField(
         max_length=3,
         choices=BloodGroupChoices.choices,
+        null=True,
         blank=True,
-        null=True
     )
 
     phone = models.CharField(
         max_length=20,
+        null=True,
         blank=True,
-        null=True
     )
 
-    permanent_address = models.TextField(
-        blank=True,
-        null=True
-    )
-
-    current_address = models.TextField(
-        blank=True,
-        null=True
-    )
+    permanent_address = models.TextField(null=True, blank=True)
+    current_address = models.TextField(null=True, blank=True)
 
     emergency_contact_name = models.CharField(
         max_length=100,
+        null=True,
         blank=True,
-        null=True
     )
 
     emergency_contact_number = models.CharField(
         max_length=20,
+        null=True,
         blank=True,
-        null=True
     )
 
     emergency_contact_relationship = models.CharField(
         max_length=50,
+        null=True,
         blank=True,
-        null=True
     )
 
     status = models.CharField(
         max_length=10,
         choices=StatusChoices.choices,
-        default=StatusChoices.ACTIVE
+        default=StatusChoices.ACTIVE,
     )
 
-    # OTP fields: OTP processing is handled in utils.py/views.py
+    # OTP and request-limit fields
     attempt = models.PositiveIntegerField(default=0)
 
     otp_window_started_at = models.DateTimeField(
+        null=True,
         blank=True,
-        null=True
     )
 
     blocked_until = models.DateTimeField(
+        null=True,
         blank=True,
-        null=True
     )
 
-    otp = models.CharField(
-        max_length=6,
-        blank=True,
-        default=""
-    )
+    otp = models.CharField(max_length=6, blank=True, default="")
 
     otp_purpose = models.CharField(
         max_length=30,
         choices=OTPPurposeChoices.choices,
         blank=True,
-        default=""
+        default="",
     )
 
-    otp_expires_at = models.DateTimeField(
-        blank=True,
-        null=True
-    )
+    otp_expires_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return self.username
+        return self.email or f"User {self.pk}"
 
+
+
+# Client Model
 
 class Client(models.Model):
 
@@ -163,49 +165,30 @@ class Client(models.Model):
         ACTIVE = "Active", "Active"
         INACTIVE = "Inactive", "Inactive"
 
-    fname = models.CharField(
-        max_length=100,
-        blank=True
-    )
-
-    lname = models.CharField(
-        max_length=100,
-        blank=True
-    )
-
-    country = models.CharField(
-        max_length=100,
-        blank=True
-    )
-
-    contactno = models.CharField(
-        max_length=20,
-        blank=True
-    )
-
-    address = models.TextField(
-        blank=True
-    )
+    fname = models.CharField(max_length=100, blank=True)
+    lname = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+    contactno = models.CharField(max_length=20, blank=True)
+    address = models.TextField(blank=True)
 
     email = models.EmailField(
         unique=True,
+        null=True,
         blank=True,
-        null=True
     )
 
     status = models.CharField(
         max_length=10,
         choices=StatusChoices.choices,
-        default=StatusChoices.ACTIVE
+        default=StatusChoices.ACTIVE,
     )
 
-    # Audit fields
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="clients_created"
+        related_name="clients_created",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -215,10 +198,93 @@ class Client(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="clients_updated"
+        related_name="clients_updated",
     )
 
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.fname} {self.lname}".strip()
+
+
+
+# Project Model
+
+class Project(models.Model):
+
+    class ProjectType(models.TextChoices):
+        WEB = "Web", "Web"
+        MOBILE = "Mobile", "Mobile"
+        SOFTWARE = "Software", "Software"
+        DATA = "Data", "Data"
+        OTHER = "Other", "Other"
+
+    class ProjectStatus(models.TextChoices):
+        NOT_STARTED = "Not Started", "Not Started"
+        IN_PROGRESS = "In Progress", "In Progress"
+        COMPLETED = "Completed", "Completed"
+        ON_HOLD = "On Hold", "On Hold"
+        CANCELLED = "Cancelled", "Cancelled"
+
+    title = models.CharField(max_length=200, unique=True)
+
+    type = models.CharField(
+        max_length=20,
+        choices=ProjectType.choices,
+        default=ProjectType.OTHER,
+    )
+
+    date_of_completion = models.DateField(null=True, blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=ProjectStatus.choices,
+        default=ProjectStatus.NOT_STARTED,
+    )
+
+    client = models.ForeignKey(
+        "users.Client",
+        on_delete=models.PROTECT,
+        related_name="projects",
+    )
+
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="managed_projects",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="projects_created",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="projects_updated",
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    is_deleted = models.BooleanField(default=False)
+
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="projects_deleted",
+    )
+
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return self.title

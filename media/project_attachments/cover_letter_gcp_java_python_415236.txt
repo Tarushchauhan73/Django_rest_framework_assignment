@@ -1,0 +1,26 @@
+Tarush Chauhan
+Ambala City, Haryana, India
+tarushchauhan19@gmail.com | +91-9350356163
+linkedin.com/in/tarush-chauhan-b91b8a256 | github.com/Tarushchauhan73
+
+June 4, 2026
+
+Hiring Manager
+
+Subject: Application for Career Opportunities: GCP Java Python (415236)
+
+Dear Hiring Manager,
+
+I am writing to apply for the Career Opportunities: GCP Java Python role, reference 415236. I am a Computer Science Engineering student with hands-on experience in backend development, REST API integration, Git-based collaboration, and cloud fundamentals across Google Cloud Platform, AWS, and Azure. The role interests me because it combines cloud engineering with backend software development, two areas I have actively built projects around and want to grow in professionally.
+
+During my Software Developer Internship at Geeks Keepler, I worked on REST API features for internal backend modules, debugged request and response issues, validated payloads, and collaborated through Git branching and version control workflows. This experience helped me understand how production backend systems are built, tested, improved, and maintained in a team environment.
+
+My project work also aligns well with this opportunity. I built a secure web-based file sharing platform using Node.js, Express.js, MongoDB, JavaScript, HTML, and CSS, where I designed APIs for user management, file upload and download flows, access control, and database-backed metadata. I implemented JWT authentication, protected routes, and role-based authorization to secure application endpoints. I have also built Python-based machine learning workflows using Pandas, NumPy, and Scikit-learn, which strengthened my ability to write structured code, clean data, evaluate results, and solve technical problems systematically.
+
+I bring strong foundations in Python, SQL, REST APIs, Git, Linux, Docker basics, CI/CD fundamentals, and cloud concepts. While my current resume highlights Python and backend/cloud work most strongly, I am comfortable learning and applying new backend technologies quickly, including Java-based service development, and I am motivated to contribute in a GCP-focused engineering environment.
+
+I would welcome the opportunity to discuss how my backend development experience, cloud fundamentals, and eagerness to learn can support your team. Thank you for your time and consideration.
+
+Sincerely,
+
+Tarush Chauhan

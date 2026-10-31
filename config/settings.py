@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 from pathlib import Path
-
+from datetime import timedelta
 import users
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -120,6 +120,13 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Static files
+STATIC_URL = "/static/"
+
+# Uploaded files
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
@@ -133,8 +140,14 @@ REST_FRAMEWORK = {
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         
     ),
+      "DEFAULT_PERMISSION_CLASSES": [
+            "rest_framework.permissions.IsAuthenticated",
+            "rest_framework.authentication.SessionAuthentication",
+      ],
+          
+
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 2,
+    'PAGE_SIZE': 100,
 }
 
 import os
@@ -148,6 +161,13 @@ EMAIL_HOST_USER = ("tarushchauhan19@gmail.com")
 EMAIL_HOST_PASSWORD = ("xugf webp ljbg azdm")
 
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+}
  
  
  

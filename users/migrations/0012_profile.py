@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
             name='Profile',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=50, unique=True)),
+                ('role', models.CharField(max_length=50, unique=True)),
                 ('key', models.SlugField(unique=True)),
                 ('is_active', models.BooleanField(default=True)),
             ],

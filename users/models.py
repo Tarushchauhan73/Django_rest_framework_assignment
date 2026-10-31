@@ -3,14 +3,14 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from profile import Profile
-
+from django.utils import timezone
 
 # Dynamic Profile Model
 class Profile(models.Model):
-    name = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=100, unique=True)
     is_active = models.BooleanField(default=True)
     is_default = models.BooleanField(default=False)
-
+    created_at = models.DateTimeField(auto_now_add=True)
     def __str__(self):
         return self.name
 
@@ -54,14 +54,14 @@ class User(AbstractUser):
 
     email = models.EmailField(
         unique=True,
-        blank=True,
-        null=True,
+        blank=False,
+        null=False,
     )
 
     # Profiles are configured dynamically in the database.
     profiles = models.ForeignKey(
         Profile,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="users",
@@ -243,11 +243,12 @@ class Project(models.Model):
     )
 
     client = models.ForeignKey(
-        "users.Client",
-        on_delete=models.PROTECT,
-        related_name="projects",
-    )
-
+    "users.Client",
+    on_delete=models.SET_NULL,
+    related_name="projects",
+    null=True,
+    blank=True,
+)
     manager = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -288,3 +289,23 @@ class Project(models.Model):
 
     def __str__(self):
         return self.title
+
+class ProjectAttachement(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    file = models.FileField(upload_to="project_attachments/")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="attachements_uploaded",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Attachement for {self.project.title} uploaded by {self.uploaded_by.email if self.uploaded_by else 'Unknown'}"
+

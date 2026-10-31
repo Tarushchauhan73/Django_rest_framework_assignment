@@ -378,31 +378,42 @@ class ProjectSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
     def create(self, validated_data):
+        # Get uploaded files from validated data
+        attachments = validated_data.pop("attachments", [])
+
+        # Get request from serializer context
         request = self.context.get("request")
 
-        # Remove attachments from project fields.
-        validated_data.pop("attachments", None)
+       
+        if request:
+            attachments = request.FILES.getlist("attachments") or attachments
 
-        # Get uploaded files directly from the request.
-        files = request.FILES.getlist("attachments")
-
-        # Create the project.
+      
         project = Project.objects.create(**validated_data)
 
-        # Save each attachment against the project.
-        for uploaded_file in files:
+        for uploaded_file in attachments:
             ProjectAttachement.objects.create(
                 project=project,
                 file=uploaded_file,
-                uploaded_by=request.user if request else None,
+                uploaded_by=request.user if request else None
             )
 
         return project
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        data["attachments"] = ProjectAttachementSerializer(
+            instance.attachments.all(),
+            many=True
+        ).data
+
+        return data
+
     def update(self, instance, validated_data):
      request = self.context.get("request")
 
-     # Get attachment ID to delete
+     
      attachment_id = request.data.get("attachments_id") if request else None
 
      # Get newly uploaded files
@@ -411,7 +422,7 @@ class ProjectSerializer(serializers.ModelSerializer):
      if request:
         files = files or request.FILES.getlist("attachments")
 
-     # Delete the selected attachment
+    
      if attachment_id:
         try:
             attachment = instance.attachments.get(id=attachment_id)
@@ -423,13 +434,13 @@ class ProjectSerializer(serializers.ModelSerializer):
         attachment.file.delete(save=False)
         attachment.delete()
 
-     # Update project fields
+  
      for field, value in validated_data.items():
         setattr(instance, field, value)
 
      instance.save()
 
-    # Add new files only when supplied
+  
      for uploaded_file in files:
         ProjectAttachement.objects.create(
             project=instance,

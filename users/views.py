@@ -1,7 +1,7 @@
 
 from django.contrib.auth import get_user_model
 from django.http import request
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 
 from django.utils import timezone
 
@@ -583,6 +583,8 @@ class ProjectListCreateView(generics.ListCreateAPIView):
 
 class ProjectRestoreView(APIView):
     parser_classes = [AllowAny]
+    authentication_classes = [] 
+    permission_classes = [AllowAny]
 
     def patch(self, request, pk):
         project = Project.objects.filter(pk=pk).first()
@@ -615,7 +617,50 @@ class ProjectRestoreView(APIView):
             },
             status=status.HTTP_200_OK
         )
+class ProjectRestoreView(APIView):
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
+    def patch(self, request, pk):
+        project = Project.objects.filter(pk=pk).first()
+
+        if not project:
+            return Response(
+                {"error": "Project not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not project.is_deleted:
+            return Response(
+                {"message": "Project is already active."},
+                status=status.HTTP_200_OK
+            )
+
+        project.is_deleted = False
+        project.deleted_at = None
+        project.deleted_by = None
+
+        # Do not assign AnonymousUser to updated_by.
+        project.save(
+            update_fields=[
+                "is_deleted",
+                "deleted_at",
+                "deleted_by"
+            ]
+        )
+
+        return Response(
+            {
+                "message": "Project restored successfully.",
+                "project": ProjectSerializer(
+                    project,
+                    context={"request": request}
+                ).data
+            },
+            status=status.HTTP_200_OK
+        )
+    
 class ProfileListView(APIView):
     permission_classes = [AllowAny]
 

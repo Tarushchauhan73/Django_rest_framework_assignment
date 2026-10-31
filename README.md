@@ -469,6 +469,15 @@ Replace the sample email and OTP with valid values.
 <img width="1440" height="780" alt="Screenshot 2026-10-15 at 11 25 03 AM" src="https://github.com/user-attachments/assets/
 511cf133-e052-41f8-837b-df4e4f92a44d" />
 
+<img width="1440" height="900" alt="Screenshot 2026-10-31 at 8 36 44 PM" src="https://github.com/user-attachments/assets/6b155f1a-7d6d-4c94-86c8-4c8bd755c268" />
+<img width="1440" height="900" alt="Screenshot 2026-10-31 at 8 29 21 PM" src="https://github.com/user-attachments/assets/8ed1317c-24bc-4734-ba4d-c9deb7f193bd" />
+<img width="1440" height="900" alt="Screenshot 2026-10-31 at 8 28 16 PM" src="https://github.com/user-attachments/assets/e4c9a30e-3cf6-4721-bcc6-02b0d4f954bd" />
+<img width="1440" height="900" alt="Screenshot 2026-10-31 at 8 26 15 PM" src="https://github.com/user-attachments/assets/a7e993e7-65be-4e7f-ab11-650a254906fc" />
+<img width="1440" height="900" alt="image" src="https://github.com/user-attachments/assets/5df769b6-7dcb-408d-9114-b7a1aea5c965" />
+
+
+
+
 
 
 ![Screenshot 2026-10-26 at 9.42.33 AM](Screenshot%202026-10-26%20at%209.42.33%20AM.png)

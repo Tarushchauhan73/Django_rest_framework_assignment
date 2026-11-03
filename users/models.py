@@ -227,6 +227,11 @@ class Project(models.Model):
         CANCELLED = "Cancelled", "Cancelled"
 
     title = models.CharField(max_length=200, unique=True)
+    
+    description = models.TextField(
+    null=True,
+    blank=True,
+)
 
     type = models.CharField(
         max_length=20,

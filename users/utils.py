@@ -1,10 +1,11 @@
 
 import secrets
 from datetime import timedelta
-
+import logging
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-
+from django.core.mail import send_mail
+from django.conf import settings
 
 def generate_otp(user, purpose):
     """Generate a six-digit OTP valid for five minutes."""
@@ -98,3 +99,121 @@ def check_otp_request_limit(user):
             "blocked_until",
         ]
     )
+
+logger = logging.getLogger(__name__)
+
+
+def send_project_notifications(project):
+
+    results = {
+        "client": {},
+        "manager": {},
+    }
+
+    # Client notification
+    if project.client and project.client.email:
+        try:
+            manager = project.manager
+
+            manager_name = (
+                manager.get_full_name() or manager.username
+                if manager else "Not assigned"
+            )
+
+            manager_email = (
+                manager.email if manager else "Not available"
+            )
+
+            message = f"""
+Hello {project.client.fname},
+
+A new project has been assigned to you.
+
+Project Title: {project.title}
+Status: {project.status}
+Description: {project.description or "Not provided"}
+
+Assigned Manager: {manager_name}
+Manager Email: {manager_email}
+
+Regards,
+Team
+"""
+
+            sent = send_mail(
+                subject=f"New Project Assigned: {project.title}",
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[project.client.email],
+                fail_silently=False,
+            )
+
+            results["client"] = {
+                "recipient": project.client.email,
+                "status": "submitted" if sent == 1 else "failed",
+                "description_included": bool(project.description),
+            }
+
+        except Exception as error:
+            logger.exception("Client notification failed.")
+            results["client"] = {
+                "recipient": project.client.email,
+                "status": "failed",
+                "error": str(error),
+            }
+    else:
+        results["client"] = {"status": "skipped", "reason": "No client email"}
+
+    # Manager notification
+    if project.manager and project.manager.email:
+        try:
+            client_name = (
+                f"{project.client.fname} {project.client.lname}"
+                if project.client else "Not assigned"
+            )
+
+            client_email = (
+                project.client.email if project.client else "Not available"
+            )
+
+            message = f"""
+Hello {project.manager.get_full_name() or project.manager.username},
+
+A new project has been assigned to you.
+
+Project Title: {project.title}
+Status: {project.status}
+Description: {project.description or "Not provided"}
+
+Client: {client_name}
+Client Email: {client_email}
+
+Regards,
+Team
+"""
+
+            sent = send_mail(
+                subject=f"New Project Assigned: {project.title}",
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[project.manager.email],
+                fail_silently=False,
+            )
+
+            results["manager"] = {
+                "recipient": project.manager.email,
+                "status": "submitted" if sent == 1 else "failed",
+                "description_included": bool(project.description),
+            }
+
+        except Exception as error:
+            logger.exception("Manager notification failed.")
+            results["manager"] = {
+                "recipient": project.manager.email,
+                "status": "failed",
+                "error": str(error),
+            }
+    else:
+        results["manager"] = {"status": "skipped", "reason": "No manager email"}
+
+    return results

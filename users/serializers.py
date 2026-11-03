@@ -1,4 +1,6 @@
 
+from urllib import request
+from urllib import request
 from xml.dom.minidom import Attr
 
 from django.db.models import Value
@@ -9,8 +11,29 @@ from .models import Client, Profile, Project, ProjectAttachement
 from .models import Project, ProjectAttachement, Client, User
 User = get_user_model()
 
+class ProfileSerializer(serializers.ModelSerializer):
+    role = serializers.CharField(source="name", read_only=True)
 
+    class Meta:
+        model = Profile
+        fields = ["id", "role", "is_active", "is_default"]
+
+class UserDetailSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+        ]
+        
 class ClientSerializer(serializers.ModelSerializer):
+
+    created_by = UserDetailSerializer(read_only=True)
+    updated_by = UserDetailSerializer(read_only=True)
 
     class Meta:
         model = Client
@@ -38,35 +61,6 @@ class ClientSerializer(serializers.ModelSerializer):
                 })
 
         return attrs
-
-
-class ProfileSerializer(serializers.ModelSerializer):
-        
-    role = serializers.CharField(
-        source="name",
-        required=True
-    )
-
-    class Meta:
-        model = Profile
-        fields = ["id", "role", "is_active", "is_default"]
-        read_only_fields = ["id", "is_default"]
-
-    def validate_name(self, value):
-        value = value.strip()
-
-        existing = Profile.objects.filter(name__iexact=value)
-
-        if self.instance:
-            existing = existing.exclude(pk=self.instance.pk)
-
-        if existing.exists():
-            raise serializers.ValidationError(
-                "A profile with this name already exists."
-            )
-
-        return value
-
 
 class UserSerializer(serializers.ModelSerializer):
 
@@ -238,8 +232,13 @@ User = get_user_model()
 class UserDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email"]
-
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+        ]
 class ClientRelatedField(serializers.RelatedField):
     def to_internal_value(self, value):
         if isinstance(value, int) or (
@@ -337,11 +336,15 @@ class ManagerRelatedField(serializers.RelatedField):
             "first_name": manager.first_name,
             "last_name": manager.last_name,
             "email": manager.email,
+            "role": manager.profiles.name if manager.profiles else None,
         }
 
 
 
 class ProjectAttachementSerializer(serializers.ModelSerializer):
+
+    file = serializers.SerializerMethodField()
+
     class Meta:
         model = ProjectAttachement
         fields = [
@@ -350,6 +353,19 @@ class ProjectAttachementSerializer(serializers.ModelSerializer):
             "uploaded_by",
             "uploaded_at",
         ]
+
+    def get_file(self, obj):
+        if not obj.file:
+            return None
+
+        request = self.context.get("request")
+
+        if request:
+            return request.build_absolute_uri(obj.file.url)
+
+        return obj.file.url
+
+        
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -405,7 +421,8 @@ class ProjectSerializer(serializers.ModelSerializer):
 
         data["attachments"] = ProjectAttachementSerializer(
             instance.attachments.all(),
-            many=True
+            many=True,
+           context=self.context,
         ).data
 
         return data
@@ -463,6 +480,19 @@ class ProjectSerializer(serializers.ModelSerializer):
         ).data
 
         return data
+
+    def validate_manager(self, value):
+     if value.profiles is None:
+        raise serializers.ValidationError(
+            "This user has no assigned role. Assign a Manager role first."
+        )
+
+     if value.profiles.name.strip().lower() != "manager":
+        raise serializers.ValidationError(
+            "Projects can only be assigned to users with the Manager role."
+        )
+
+     return value
     
 
               

@@ -15,7 +15,11 @@ urlpatterns = [
     path("reset-password/", views.ResetPasswordView.as_view(), name="reset-password"),
 
     path("clients/", views.ClientListCreateAPIView.as_view(), name="client-list-create"),
-    path("clients/<int:pk>/", views.ClientDetailAPIView.as_view(), name="client-detail"),
+   path(
+    "clients/<int:pk>/",
+    views.ClientDetailView.as_view(),
+    name="client-detail"
+),
 
     path("projects/", views.ProjectListCreateView.as_view(), name="project-list-create"),
     path("projects/<int:pk>/", views.ProjectDetailView.as_view(), name="project-detail"),
@@ -35,21 +39,43 @@ path(
     name="project-attachement-detail",
 ),
 
+# Single restore
 path(
-    "users/<int:pk>/restore/",
-    UserRestoreView.as_view(),
+    "users/restore/<int:pk>/",
+    views.UserRestoreView.as_view(),
     name="user-restore"
 ),
 
 path(
-    "clients/<int:pk>/restore/",
-    ClientRestoreView.as_view(),
+    "clients/restore/<int:pk>/",
+    views.ClientRestoreView.as_view(),
     name="client-restore"
 ),
 
 path(
-    "projects/<int:pk>/restore/",
-    ProjectRestoreView.as_view(),
+    "projects/restore/<int:pk>/",
+    views.ProjectRestoreView.as_view(),
     name="project-restore"
 ),
+
+# Bulk restore
+path(
+    "users/restore/",
+    views.UserRestoreView.as_view(),
+    name="user-bulk-restore"
+),
+
+path(
+    "clients/restore/",
+    views.ClientRestoreView.as_view(),
+    name="client-bulk-restore"
+),
+
+path(
+    "projects/restore/",
+    views.ProjectRestoreView.as_view(),
+    name="project-bulk-restore"
+),
+
+
 ]

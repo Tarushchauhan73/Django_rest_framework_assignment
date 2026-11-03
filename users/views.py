@@ -1,10 +1,15 @@
 
+import profile
+from typing import Self
+
 from django.contrib.auth import get_user_model
+from django.db.migrations import serializer
 from django.http import request
+from django.test import client
 from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
-
-from django.utils import timezone
-
+import json
+from django.utils import  timezone
+from django.db.models import Q
 from django.views.generic import ListView
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -19,7 +24,7 @@ from rest_framework import status
 
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
+from .utils import send_project_notifications
 from .models import Project, ProjectAttachement
 from .serializers import ProjectAttachementSerializer
 from .models import Client, Project, Profile
@@ -37,6 +42,7 @@ from .utils import (
     clear_otp,
     check_otp_request_limit,
 )
+from .utils import send_project_notifications
 
 User = get_user_model()
 
@@ -65,7 +71,47 @@ class UserListCreateView(APIView):
                 profiles__name__iexact=role.strip()
             )
 
-        users = users.order_by("id")
+        first_name = request.query_params.get("first_name")
+        last_name = request.query_params.get("last_name")
+        email = request.query_params.get("email")
+        phone = request.query_params.get("phone")
+        nationality = request.query_params.get("nationality")
+        gender = request.query_params.get("gender")
+
+        if first_name:
+            users = users.filter(first_name__icontains=first_name)
+
+        if last_name:
+            users = users.filter(last_name__icontains=last_name)
+
+        if email:
+            users = users.filter(email__icontains=email)
+
+        if phone:
+            users = users.filter(phone__icontains=phone)
+
+        if nationality:
+            users = users.filter(nationality__icontains=nationality)
+
+        if gender:
+            users = users.filter(gender__iexact=gender)
+
+        # General search across multiple fields
+        search = request.query_params.get("search")
+
+        if search:
+            users = users.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(phone__icontains=search) |
+                Q(nationality__icontains=search) |
+                Q(profiles__name__icontains=search)
+            )
+
+        # Remove duplicate records and order users
+        users = users.order_by("id").distinct()
 
         paginator = PageNumberPagination()
         paginator.page_size = 100
@@ -167,7 +213,41 @@ class UserDetailView(APIView):
 class UserRestoreView(APIView):
     permission_classes = [AllowAny]
 
-    def patch(self, request, pk):
+    def patch(self, request, pk=None):
+        # Bulk restore
+        if pk is None:
+            user_ids = request.data.get("user_ids")
+
+            if not isinstance(user_ids, list) or not user_ids:
+                return Response(
+                    {"error": "Please provide a non-empty user_ids list."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            users = User.objects.filter(
+                pk__in=user_ids,
+                status="Inactive"
+            )
+
+            restored_users = []
+
+            for user in users:
+                user.status = "Active"
+                user.save(update_fields=["status"])
+                restored_users.append(user)
+
+            return Response(
+                {
+                    "message": "Users restored successfully.",
+                    "restored_count": len(restored_users),
+                    "users": UserSerializer(
+                        restored_users, many=True
+                    ).data
+                },
+                status=status.HTTP_200_OK
+            )
+
+        # Single restore
         user = User.objects.filter(pk=pk).first()
 
         if not user:
@@ -437,13 +517,56 @@ class ClientListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        clients = Client.objects.all().order_by("id")
+        clients = Client.objects.all()
+
+        fname = request.query_params.get("fname")
+        lname = request.query_params.get("lname")
+        email = request.query_params.get("email")
+        contactno = request.query_params.get("contactno")
+        country = request.query_params.get("country")
+        address = request.query_params.get("address")
+        client_status = request.query_params.get("status")
+
+        if fname:
+            clients = clients.filter(fname__icontains=fname)
+
+        if lname:
+            clients = clients.filter(lname__icontains=lname)
+
+        if email:
+            clients = clients.filter(email__icontains=email)
+
+        if contactno:
+            clients = clients.filter(contactno__icontains=contactno)
+
+        if country:
+            clients = clients.filter(country__icontains=country)
+
+        if address:
+            clients = clients.filter(address__icontains=address)
+
+        if client_status:
+            clients = clients.filter(status__iexact=client_status)
+
+        # General search across multiple fields
+        search = request.query_params.get("search")
+
+        if search:
+            clients = clients.filter(
+                  Q(fname__icontains=search)
+                 | Q(lname__icontains=search)
+                | Q(email__icontains=search)
+                | Q(contactno__icontains=search)
+                | Q(country__icontains=search)
+                | Q(address__icontains=search)
+            )
+
+        # Remove duplicates and order results
+        clients = clients.order_by("id").distinct()
 
         paginator = PageNumberPagination()
         paginator.page_size = 100
-        page = paginator.paginate_queryset(
-            clients, request, view=self
-        )
+        page = paginator.paginate_queryset(clients, request, view=self)
 
         serializer = ClientSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
@@ -461,7 +584,6 @@ class ClientListCreateAPIView(APIView):
             serializer.data,
             status=status.HTTP_201_CREATED,
         )
-
 
 
 # CLIENT DETAIL, UPDATE AND DELETE
@@ -510,39 +632,83 @@ class ClientDetailAPIView(APIView):
 
         return Response(serializer.data)
 
+class ClientDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def delete(self, request, pk):
-        client = self.get_object(pk)
+        client = Client.objects.filter(
+            pk=pk,
+            status="Active"
+        ).first()
 
         if client is None:
             return Response(
-                {"error": "Client not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        client.delete()
-
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-class ClientRestoreView(APIView):
-    permission_classes = [AllowAny]
-
-    def patch(self, request, pk):
-        client = Client.objects.filter(pk=pk).first()
-
-        if not client:
-            return Response(
-                {"error": "Client not found."},
+                {"error": "Client not found or already inactive."},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        if client.status == "Active":
+        client.status = "Inactive"
+        client.updated_by = request.user
+        client.save()
+
+        return Response(
+            {"message": "Client soft-deleted successfully."},
+            status=status.HTTP_200_OK
+        )
+
+class ClientRestoreView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk=None):
+        # Bulk restore
+        if pk is None:
+            client_ids = request.data.get("client_ids")
+
+            if not isinstance(client_ids, list) or not client_ids:
+                return Response(
+                    {"error": "Please provide a non-empty client_ids list."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            clients = Client.objects.filter(
+                pk__in=client_ids,
+                status="Inactive"
+            )
+
+            restored_clients = []
+
+            for client in clients:
+                client.status = "Active"
+                client.updated_by = request.user
+                client.save()
+                restored_clients.append(client)
+
             return Response(
-                {"message": "Client is already active."},
+                {
+                    "message": "Clients restored successfully.",
+                    "restored_count": len(restored_clients),
+                    "clients": ClientSerializer(
+                        restored_clients, many=True
+                    ).data
+                },
                 status=status.HTTP_200_OK
             )
 
+        # Single restore
+        client = Client.objects.filter(
+            pk=pk,
+            status="Inactive"
+        ).first()
+
+        if client is None:
+            return Response(
+                {"error": "Client not found or already active."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         client.status = "Active"
-        client.save(update_fields=["status"])
+        client.updated_by = request.user
+        client.save()
 
         return Response(
             {
@@ -551,35 +717,88 @@ class ClientRestoreView(APIView):
             },
             status=status.HTTP_200_OK
         )
-
 # PROJECT LIST AND CREATE
-# GET  /api/projects/
-# POST /api/projects/
-# JWT authentication required
+
 
 class ProjectListCreateView(generics.ListCreateAPIView):
     serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        return Project.objects.filter(
-            is_deleted=False
-        ).order_by("created_at")
+        user = self.request.user
+
+        if not user.is_authenticated:
+            return Project.objects.none()
+
+        profile = getattr(user, "profiles", None)
+
+        if profile is None:
+            return Project.objects.none()
+
+        role = profile.name.strip().lower()
+
+        projects = Project.objects.filter(is_deleted=False)
+
+        if role in ["superadmin", "admin"]:
+            pass
+        elif role == "manager":
+            projects = projects.filter(manager=user)
+        else:
+            return Project.objects.none()
+
+        search = self.request.query_params.get("search", "").strip()
+
+        if search:
+            projects = projects.filter(
+                Q(title__icontains=search) |
+                Q(manager__username__icontains=search) |
+                Q(manager__first_name__icontains=search) |
+                Q(manager__last_name__icontains=search) |
+                Q(manager__email__icontains=search) |
+                Q(client__fname__icontains=search) |
+                Q(client__lname__icontains=search) |
+                Q(client__email__icontains=search) |
+                Q(type__icontains=search)
+            )
+
+        role = self.request.query_params.get("role", "").strip()
+        if role:
+            projects = projects.filter(
+                manager__profiles__name__iexact=role
+            )
+
+        return projects.order_by("created_at").distinct()
 
     def perform_create(self, serializer):
-     print("CONTENT TYPE:", self.request.content_type)
-     print("FILES:", self.request.FILES)
-     print("FILE KEYS:", list(self.request.FILES.keys()))
-     print(
-        "ATTACHMENTS:",
-        self.request.FILES.getlist("attachments")
-    )
+        project = serializer.save(
+            created_by=self.request.user,
+            updated_by=self.request.user,
+        )
 
-     serializer.save(
-        created_by=self.request.user,
-        updated_by=self.request.user,
-    )
+        try:
+            self.notification_results = send_project_notifications(project)
+        except Exception:
+            import logging
+            logging.exception("Project notification email failed.")
+
+            self.notification_results = {
+                "client": {"status": "failed"},
+                "manager": {"status": "failed"},
+            }
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+
+        if response.status_code == 201:
+            response.data["email_notifications"] = getattr(
+                self,
+                "notification_results",
+                {},
+            )
+
+        return response
+    
 
 class ProjectRestoreView(APIView):
     parser_classes = [AllowAny]
@@ -622,7 +841,53 @@ class ProjectRestoreView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
 
-    def patch(self, request, pk):
+    def patch(self, request, pk=None):
+        # Bulk restore
+        if pk is None:
+            project_ids = request.data.get("project_ids")
+
+            if not isinstance(project_ids, list) or not project_ids:
+                return Response(
+                    {"error": "Please provide a non-empty project_ids list."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            projects = Project.objects.filter(
+                pk__in=project_ids,
+                is_deleted=True
+            )
+
+            restored_projects = []
+
+            for project in projects:
+                project.is_deleted = False
+                project.deleted_at = None
+                project.deleted_by = None
+
+                project.save(
+                    update_fields=[
+                        "is_deleted",
+                        "deleted_at",
+                        "deleted_by"
+                    ]
+                )
+
+                restored_projects.append(project)
+
+            return Response(
+                {
+                    "message": "Projects restored successfully.",
+                    "restored_count": len(restored_projects),
+                    "projects": ProjectSerializer(
+                        restored_projects,
+                        many=True,
+                        context={"request": request}
+                    ).data
+                },
+                status=status.HTTP_200_OK
+            )
+
+        # Single restore
         project = Project.objects.filter(pk=pk).first()
 
         if not project:
@@ -641,7 +906,6 @@ class ProjectRestoreView(APIView):
         project.deleted_at = None
         project.deleted_by = None
 
-        # Do not assign AnonymousUser to updated_by.
         project.save(
             update_fields=[
                 "is_deleted",
@@ -665,11 +929,12 @@ class ProfileListView(APIView):
     permission_classes = [AllowAny]
 
     DEFAULT_PROFILES = [
-        "Administrator",
-        "Standard",
-        "Developer",
-        "Client",
-        "Human Resource",
+        "superadmin",
+        "admin",
+        "manager",
+        "teamleader",
+        "developer",
+        "HR"
     ]
 
     def get(self, request):
@@ -681,23 +946,43 @@ class ProfileListView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        serializer = ProfileSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+     role = request.data.get("role")
 
-        name = serializer.validated_data["name"]
-
-        is_default = name.casefold() in [
-            profile.casefold()
-            for profile in self.DEFAULT_PROFILES
-        ]
-
-        profile = serializer.save(is_default=is_default)
-
+     if not role or not isinstance(role, str):
         return Response(
-            ProfileSerializer(profile).data,
-            status=status.HTTP_201_CREATED,
+            {"error": "Role is required."},
+            status=status.HTTP_400_BAD_REQUEST
         )
 
+     role = role.strip()
+
+   
+     if Profile.objects.filter(name__iexact=role).exists():
+        return Response(
+            {"error": "This profile already exists."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+     serializer = ProfileSerializer(
+        data={"role": role}
+    )
+
+     serializer.is_valid(raise_exception=True)
+
+   
+     is_default = role.casefold() in {
+        name.casefold() for name in self.DEFAULT_PROFILES
+    }
+
+     profile = serializer.save(
+        is_default=is_default,
+        is_active=True
+    )
+
+     return Response(
+        ProfileSerializer(profile).data,
+        status=status.HTTP_201_CREATED
+    )
 class ProfileDetailView(APIView):
     permission_classes = [AllowAny]
 
@@ -821,38 +1106,94 @@ class ProjectDetailView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     def delete(self, request, pk):
-     project = self.get_object(pk)
+     project = Project.objects.filter(pk=pk).first()
 
-     attachment_id = request.data.get("attachment_id")
+     if not project:
+        return Response(
+            {"error": "Project not found."},
+            status=status.HTTP_404_NOT_FOUND
+        )
 
-     # CASE 1: Hard delete a specific attachment
-     if attachment_id:
+     attachment_ids = request.data.get("attachment_ids")
+     delete_all = request.data.get("delete_all_attachments", False)
+
+
+    # Convert form-data string into a Boolean
+     if isinstance(delete_all, str):
+        delete_all = delete_all.lower() in ["true", "1", "yes"]
+
+   
+     if delete_all:
+        attachments = project.attachments.all()
+
+     elif attachment_ids is not None:
+
+      
+        if isinstance(attachment_ids, str):
+            try:
+                attachment_ids = json.loads(attachment_ids)
+            except json.JSONDecodeError:
+                return Response(
+                    {"error": "Invalid attachment IDs format."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        if not isinstance(attachment_ids, list) or not attachment_ids:
+            return Response(
+                {"error": "Provide a non-empty list of attachment IDs."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
-            attachment = project.attachments.get(id=attachment_id)
-        except ProjectAttachement.DoesNotExist:
-            raise NotFound("Attachment not found in this project.")
+            attachment_ids = list(set(int(i) for i in attachment_ids))
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "All attachment IDs must be integers."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        attachment.file.delete(save=False)
-        attachment.delete()
+        attachments = project.attachments.filter(
+            id__in=attachment_ids
+        )
+
+        if attachments.count() != len(attachment_ids):
+            return Response(
+                {
+                    "error": "One or more attachments were not found in this project."
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+     else:
+        # Soft-delete the entire project
+        project.is_deleted = True
+        project.deleted_at = timezone.now()
+        project.deleted_by = request.user
+        project.save()
 
         return Response(
-            {"message": f"Attachment {attachment_id} permanently deleted."},
+            {
+                "message": f"Project {project.id} soft deleted successfully."
+            },
             status=status.HTTP_200_OK
         )
 
-    # CASE 2: Soft delete the entire project
-     project.is_deleted = True
-     project.deleted_at = timezone.now()
-     project.deleted_by = request.user
-     project.save(
-        update_fields=["is_deleted", "deleted_at", "deleted_by"]
-    )
+    # Delete physical files and database records
+     deleted_count = attachments.count()
+
+     for attachment in attachments:
+        if attachment.file:
+            attachment.file.delete(save=False)
+
+     attachments.delete()
 
      return Response(
-        {"message": f"Project {pk} soft deleted successfully."},
+        {
+            "message": "Attachments deleted successfully.",
+            "deleted_count": deleted_count
+        },
         status=status.HTTP_200_OK
     )
-
 class ProjectAttachementDetailView(APIView):
      permission_classes = [IsAuthenticated]
 
@@ -885,7 +1226,7 @@ class ProjectAttachementDetailView(APIView):
 
 class ProjectAttachementListCreateView(APIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get(self, request, project_id):
         project = get_object_or_404(
@@ -963,3 +1304,4 @@ class ProjectAttachementDetailView(APIView):
         {"message": "Attachment deleted successfully."},
         status=status.HTTP_200_OK
     )
+

@@ -314,3 +314,113 @@ class ProjectAttachement(models.Model):
     def __str__(self):
         return f"Attachement for {self.project.title} uploaded by {self.uploaded_by.email if self.uploaded_by else 'Unknown'}"
 
+
+class ProjectTask(models.Model):
+
+    # Other existing fields...
+ 
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks_assigned_to"
+    )
+
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks_assigned_by"
+    )
+
+  
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("in_progress", "In Progress"),
+        ("completed", "Completed"),
+        ("on_hold", "On Hold"),
+    ]
+    title = models.CharField(
+        max_length=200,
+        unique=True
+        )
+
+    project = models.ForeignKey(
+        "users.Project",
+        on_delete=models.CASCADE,
+        related_name="tasks",
+    )
+
+    start_date = models.DateField(
+        null=True,
+        blank=True
+        )
+
+    completion_date = models.DateField(
+        null=True,
+        blank=True
+        )
+
+    deadline_date = models.DateField(
+        null=True, 
+        blank=True
+        )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    is_deleted = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_project_tasks",
+    )
+
+    updated_by = models.ForeignKey(
+    settings.AUTH_USER_MODEL,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    related_name="updated_project_task_comments"
+)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
+
+
+class ProjectTaskcomment(models.Model):
+
+    project_task = models.ForeignKey(
+        ProjectTask,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+
+    project = models.ForeignKey(
+        "users.Project",
+        on_delete=models.CASCADE,
+        related_name="task_comments",
+    )
+
+    commented_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="task_comments",
+    )
+
+    comment = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Comment by {self.commented_by.email if self.commented_by else 'Unknown'} on task {self.project_task.title}"

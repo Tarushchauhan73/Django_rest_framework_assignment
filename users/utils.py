@@ -133,7 +133,7 @@ Project Title: {project.title}
 Status: {project.status}
 Description: {project.description or "Not provided"}
 
-Assigned Manager: {manager_name}
+Manager: {manager_name}
 Manager Email: {manager_email}
 
 Regards,
@@ -185,8 +185,8 @@ Project Title: {project.title}
 Status: {project.status}
 Description: {project.description or "Not provided"}
 
-Client: {client_name}
-Client Email: {client_email}
+client: {client_name}
+client Email: {client_email}
 
 Regards,
 Team

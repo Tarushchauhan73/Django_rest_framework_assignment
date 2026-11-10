@@ -77,5 +77,30 @@ path(
     name="project-bulk-restore"
 ),
 
+path(
+    "project-tasks/",
+    views.ProjectTaskListCreateAPIView.as_view(),
+    name="project-task-list-create"
+),
+path(
+    "project-tasks/<int:pk>/",
+    views.ProjectTaskDetailAPIView.as_view(),
+    name="project-task-detail"
+),
+path(
+    "project-task-comments/",
+    views.ProjectTaskCommentListCreateAPIView.as_view(),
+    name="project-task-comment-list-create"
+),
+path(
+    "project-task-comments/<int:pk>/",
+    views.ProjectTaskCommentDetailAPIView.as_view(),
+    name="project-task-comment-detail"
+),
 
+path(
+    "project-tasks/restore/",
+    views.ProjectTaskRestoreView.as_view(),
+    name="project-task-bulk-restore"
+),
 ]

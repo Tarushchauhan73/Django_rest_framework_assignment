@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 
 from .models import Client, Profile, Project, ProjectAttachement 
 from .models import Project, ProjectAttachement, Client, User
+from .models import ProjectTask, ProjectTaskcomment
 User = get_user_model()
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -63,6 +64,11 @@ class ClientSerializer(serializers.ModelSerializer):
         return attrs
 
 class UserSerializer(serializers.ModelSerializer):
+    def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            if self.instance:
+                self.fields["email"].required = False
 
     username = serializers.CharField(
         required=False,
@@ -84,7 +90,7 @@ class UserSerializer(serializers.ModelSerializer):
         style={"input_type": "password"},
     )
 
-    profiles = ProfileSerializer(read_only=True)
+    profile = serializers.CharField(required=False, write_only=True)
 
     profile_id = serializers.PrimaryKeyRelatedField(
         queryset=Profile.objects.filter(is_active=True),
@@ -93,6 +99,18 @@ class UserSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    profiles_details = serializers.SerializerMethodField()
+
+    def get_profiles_details(self, obj):
+        if obj.profiles:
+            return {
+                "id": obj.profiles.id,
+                "role": obj.profiles.name,
+                "is_active": obj.profiles.is_active,
+                "is_default": obj.profiles.is_default
+            }
+
+        return None
 
     class Meta:
         model = User
@@ -104,6 +122,8 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "password",
             "profiles",
+            "profile",
+            "profiles_details",
             "profile_id",
             "date_of_birth",
             "gender",
@@ -120,70 +140,96 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id"]
 
-    def validate_email(self, value):
-        value = value.strip().lower()
+    def validate_manager(self, value):
 
-        existing = User.objects.filter(email__iexact=value)
-
-        if self.instance is not None:
-            existing = existing.exclude(pk=self.instance.pk)
-
-        if existing.exists():
+        if value.status != "Active":
             raise serializers.ValidationError(
-                "A user with this email already exists."
+                "Cannot assign an inactive or soft-deleted user."
+            )
+
+        if value.profiles is None:
+            raise serializers.ValidationError(
+                "This user has no assigned role. Assign a Manager role first."
+            )
+
+        if value.profiles.name.strip().lower() != "manager":
+            raise serializers.ValidationError(
+                "Projects can only be assigned to users with Manager profiles."
             )
 
         return value
+    def validate_profile(self, value):
 
-    
+        if self.instance and self.instance.profiles:
+            if self.instance.profiles.is_default:
+                raise serializers.ValidationError(
+                    "Default profiles cannot be edited."
+                )
+
+        profile = Profile.objects.filter(role__iexact=value).first()
+
+        if not profile:
+            raise serializers.ValidationError("Profile does not exist.")
+
+        return profile
+        
     def create(self, validated_data):
-    # Get the profile selected by the user.
-     profile = validated_data.pop("profiles", None)
-
-
-     if profile is None:
-        profile = Profile.objects.filter(
-            name="Standard",
-            is_active=True,
-            is_default=True,
-        ).first()
+        # Get the profile selected by the user.
+        profile = validated_data.pop("profiles", None)
 
         if profile is None:
-            raise serializers.ValidationError({
-                "profile_id": "Default Standard profile not found."
-            })
+            profile = Profile.objects.filter(
+                name="Standard",
+                is_active=True,
+                is_default=True,
+            ).first()
 
-    # Generate password if not provided.
-     password = validated_data.pop("password", None)
+            if profile is None:
+                raise serializers.ValidationError({
+                    "profile_id": "Default Standard profile not found."
+                })
 
-     if not password:
-        email = validated_data.get("email", "")
-        password = email.split("@")[0] + "@123"
+        # Generate password if not provided.
+        password = validated_data.pop("password", None)
 
-     user = User(**validated_data)
-     user.profiles = profile
-     user.set_password(password)
-     user.save()
+        if not password:
+            email = validated_data.get("email", "")
+            password = email.split("@")[0] + "@123"
 
-     return user
+        user = User(**validated_data)
+        user.profiles = profile
+        user.set_password(password)
+        user.save()
+
+        return user
 
     
-    def update(self, instance, validated_data):
-     password = validated_data.pop("password", None)
+def update(self, instance, validated_data):
+    password = validated_data.pop("password", None)
 
-     # Preserve the existing username if it wasn't supplied.
-     if "username" not in validated_data:
+    # Handle profile update
+    profile = validated_data.pop("profile", None)
+
+    if profile is not None:
+        if instance.profiles and instance.profiles.is_default:
+            raise serializers.ValidationError({
+                "profile": "Default profiles cannot be edited."
+            })
+
+        instance.profiles = profile
+
+    # Preserve the existing username if it wasn't supplied.
+    if "username" not in validated_data:
         validated_data["username"] = instance.username
 
-     new_username = validated_data.get("username")
+    new_username = validated_data.get("username")
 
-
-     if new_username == "":
+    if new_username == "":
         new_username = None
         validated_data["username"] = None
 
     # Check whether another user already has this username.
-     if new_username is not None:
+    if new_username is not None:
         username_exists = User.objects.filter(
             username=new_username
         ).exclude(pk=instance.pk).exists()
@@ -193,14 +239,276 @@ class UserSerializer(serializers.ModelSerializer):
                 "username": "This username is already in use."
             })
 
-     for field, value in validated_data.items():
+    for field, value in validated_data.items():
         setattr(instance, field, value)
 
-     if password:
+    if password:
         instance.set_password(password)
 
-     instance.save()
-     return instance
+    instance.save()
+    return instance
+
+
+class ProjectDetailsSerializer(serializers.ModelSerializer):
+
+
+    class Meta:
+        model = Project
+        fields = [
+            "id",
+            "title",
+            "status",
+            
+        ]
+
+    def get_client_name(self, obj):
+        return f"{obj.client.fname} {obj.client.lname}"
+
+    def get_manager_name(self, obj):
+        return f"{obj.manager.first_name} {obj.manager.last_name}"
+
+
+
+class AssignedUserDetailsSerializer(serializers.ModelSerializer):
+
+    profile = serializers.CharField(
+        source="profiles.name",
+        read_only=True
+    )
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "profile"
+        ]
+
+class ProjectTaskSerializer(serializers.ModelSerializer):
+
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.all(),
+        required=False
+)
+
+    project_details = ProjectDetailsSerializer(
+        source="project",
+        read_only=True
+    )
+
+    
+    assigned_to = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        required=False
+    )
+
+    assigned_to_details = AssignedUserDetailsSerializer(
+        source="assigned_to",
+        read_only=True
+    )
+
+    assigned_by = serializers.PrimaryKeyRelatedField(
+        read_only=True
+    )
+
+    assigned_by_details = AssignedUserDetailsSerializer(
+        source="assigned_by",
+        read_only=True
+    )
+
+    created_by = serializers.PrimaryKeyRelatedField(
+        read_only=True
+    )
+
+    created_by_details = AssignedUserDetailsSerializer(
+        source="created_by",
+        read_only=True
+    )
+
+    updated_by = serializers.PrimaryKeyRelatedField(
+        read_only=True
+    )
+
+    updated_by_details = AssignedUserDetailsSerializer(
+        source="updated_by",
+        read_only=True
+    )
+
+    def validate_assigned_to(self, value):
+
+        if value.profiles is None:
+            raise serializers.ValidationError(
+                "This user does not have an assigned profile."
+            )
+
+        allowed_profiles = ["developer", "teamleader"]
+
+        if value.profiles.name.strip().lower() not in allowed_profiles:
+            raise serializers.ValidationError(
+                "Tasks can only be assigned to Developers or Team Leaders."
+            )
+
+        return value
+
+    def validate(self, attrs):
+
+        start_date = attrs.get(
+            "start_date",
+            getattr(self.instance, "start_date", None)
+        )
+
+        deadline_date = attrs.get(
+            "deadline_date",
+            getattr(self.instance, "deadline_date", None)
+        )
+
+        completion_date = attrs.get(
+            "completion_date",
+            getattr(self.instance, "completion_date", None)
+        )
+
+        if start_date and deadline_date:
+            if deadline_date < start_date:
+                raise serializers.ValidationError({
+                    "deadline_date":
+                    "Deadline cannot be before the start date."
+                })
+
+        if completion_date and start_date:
+            if completion_date < start_date:
+                raise serializers.ValidationError({
+                    "completion_date":
+                    "Completion date cannot be before the start date."
+                })
+
+        return attrs
+
+    class Meta:
+        model = ProjectTask
+
+        fields = [
+            "id",
+            "title",
+
+            "project",
+            "project_details",
+
+            "assigned_to",
+            "assigned_to_details",
+
+            "assigned_by",
+            "assigned_by_details",
+
+            "start_date",
+            "completion_date",
+            "deadline_date",
+            "status",
+
+            "created_by",
+            "created_by_details",
+
+            "updated_by",
+            "updated_by_details",
+
+            "created_at",
+            "updated_at"
+        ]
+
+        read_only_fields = [
+            "id",
+            "assigned_by",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at"
+        ]
+
+
+class ProjectTaskDetailsSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = ProjectTask
+        fields = [
+            "id",
+            "title",
+            "start_date",
+            "completion_date",
+            "deadline_date",
+            "status"
+        ]
+class ProjectTaskCommentSerializer(serializers.ModelSerializer):
+
+    commented_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    commented_by_name = serializers.SerializerMethodField()
+
+    project_task = serializers.PrimaryKeyRelatedField(
+        queryset=ProjectTask.objects.all()
+    )
+
+    project_task_details = ProjectTaskDetailsSerializer(
+        source="project_task",
+        read_only=True
+    )
+
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.all()
+    )
+
+    project_details = ProjectDetailsSerializer(
+        source="project",
+        read_only=True
+    )
+
+    def get_commented_by_name(self, obj):
+        if obj.commented_by:
+            return (
+                f"{obj.commented_by.first_name} "
+                f"{obj.commented_by.last_name}"
+            )
+        return None
+
+    def validate(self, attrs):
+        task = attrs.get(
+            "project_task",
+            getattr(self.instance, "project_task", None)
+        )
+
+        project = attrs.get(
+            "project",
+            getattr(self.instance, "project", None)
+        )
+
+        if task and project and task.project_id != project.id:
+            raise serializers.ValidationError(
+                "The selected project does not belong to this task."
+            )
+
+        return attrs
+
+    class Meta:
+        model = ProjectTaskcomment
+
+        fields = [
+            "id",
+            "commented_by",
+            "commented_by_name",
+            "comment",
+            "created_at",
+            "updated_at",
+            "project_task",
+            "project_task_details",
+            "project",
+            "project_details",
+            
+        ]
+
+        read_only_fields = [
+            "commented_by",
+            "created_at",
+            "updated_at"
+        ]
 
 
 class SendOTPSerializer(serializers.Serializer):
@@ -378,7 +686,10 @@ class ProjectSerializer(serializers.ModelSerializer):
 
     manager = ManagerRelatedField(
         queryset=User.objects.all(),
-    )
+        required=True,
+        allow_null=False
+)
+    
 
     created_by = UserDetailSerializer(read_only=True)
     updated_by = UserDetailSerializer(read_only=True)
@@ -480,19 +791,47 @@ class ProjectSerializer(serializers.ModelSerializer):
         ).data
 
         return data
-
-    def validate_manager(self, value):
-     if value.profiles is None:
-        raise serializers.ValidationError(
-            "This user has no assigned role. Assign a Manager role first."
-        )
-
-     if value.profiles.name.strip().lower() != "manager":
-        raise serializers.ValidationError(
-            "Projects can only be assigned to users with the Manager role."
-        )
-
-     return value
     
+    def validate_manager(self, value):
+
+        if value.status != "Active":
+            raise serializers.ValidationError(
+                "Cannot assign an inactive or soft-deleted user."
+            )
+
+        if value.profiles is None:
+            raise serializers.ValidationError(
+                "This user has no assigned role."
+            )
+
+        allowed_profiles = [
+            "manager",
+           
+        ]
+
+        if value.profiles.name.strip().lower() not in allowed_profiles:
+            raise serializers.ValidationError(
+                "Projects can only be assigned to users with Manager profiles."
+            )
+
+        return value
+class ProjectDetailsSerializer(serializers.ModelSerializer):
+    client_name = serializers.SerializerMethodField()
+    manager_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Project
+        fields = [
+            "id",
+            "title",
+            "status",
+           
+        ]
+
+    def get_client_name(self, obj):
+        return f"{obj.client.fname} {obj.client.lname}"
+
+    def get_manager_name(self, obj):
+        return f"{obj.manager.first_name} {obj.manager.last_name}"
 
               

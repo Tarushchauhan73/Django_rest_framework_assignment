@@ -25,8 +25,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .utils import send_project_notifications
-from .models import Project, ProjectAttachement
-from .serializers import ProjectAttachementSerializer
+from .models import Project, ProjectAttachement, ProjectTask, ProjectTaskcomment
+from .serializers import ProjectAttachementSerializer, ProjectTaskCommentSerializer, ProjectTaskSerializer
 from .models import Client, Project, Profile
 from .serializers import (
     UserSerializer,
@@ -51,19 +51,43 @@ User = get_user_model()
 # USER LIST AND CREATE
 # GET  /api/users/
 # POST /api/users/
+
 class UserListCreateView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        users = User.objects.filter(status="Active")
+        users = User.objects.all()
 
-        # Filter users by profile ID
+        search = request.query_params.get("search", "").strip()
+
+        if search.lower() == "inactive":
+            users = users.filter(status__iexact="Inactive")
+
+        elif search.lower() == "active":
+            users = users.filter(status__iexact="Active")
+
+        else:
+          
+            users = users.filter(status="Active")
+
+            if search:
+                users = users.filter(
+                    Q(username__icontains=search) |
+                    Q(first_name__icontains=search) |
+                    Q(last_name__icontains=search) |
+                    Q(email__icontains=search) |
+                    Q(phone__icontains=search) |
+                    Q(nationality__icontains=search) |
+                    Q(profiles__name__icontains=search)
+                )
+
+      
         profile_id = request.query_params.get("profile_id")
 
         if profile_id:
             users = users.filter(profiles_id=profile_id)
 
-        # Filter users by role/profile name
+     
         role = request.query_params.get("role")
 
         if role:
@@ -71,48 +95,51 @@ class UserListCreateView(APIView):
                 profiles__name__iexact=role.strip()
             )
 
+        
         first_name = request.query_params.get("first_name")
-        last_name = request.query_params.get("last_name")
-        email = request.query_params.get("email")
-        phone = request.query_params.get("phone")
-        nationality = request.query_params.get("nationality")
-        gender = request.query_params.get("gender")
 
         if first_name:
-            users = users.filter(first_name__icontains=first_name)
+            users = users.filter(
+                first_name__icontains=first_name
+            )
+
+      
+        last_name = request.query_params.get("last_name")
 
         if last_name:
-            users = users.filter(last_name__icontains=last_name)
+            users = users.filter(
+                last_name__icontains=last_name
+            )
+
+        
+        email = request.query_params.get("email")
 
         if email:
             users = users.filter(email__icontains=email)
 
+    
+        phone = request.query_params.get("phone")
+
         if phone:
             users = users.filter(phone__icontains=phone)
 
+        
+        nationality = request.query_params.get("nationality")
+
         if nationality:
-            users = users.filter(nationality__icontains=nationality)
+            users = users.filter(
+                nationality__icontains=nationality
+            )
+
+    
+        gender = request.query_params.get("gender")
 
         if gender:
             users = users.filter(gender__iexact=gender)
 
-        # General search across multiple fields
-        search = request.query_params.get("search")
-
-        if search:
-            users = users.filter(
-                Q(username__icontains=search) |
-                Q(first_name__icontains=search) |
-                Q(last_name__icontains=search) |
-                Q(email__icontains=search) |
-                Q(phone__icontains=search) |
-                Q(nationality__icontains=search) |
-                Q(profiles__name__icontains=search)
-            )
-
-        # Remove duplicate records and order users
         users = users.order_by("id").distinct()
 
+      
         paginator = PageNumberPagination()
         paginator.page_size = 100
 
@@ -123,6 +150,7 @@ class UserListCreateView(APIView):
         serializer = UserSerializer(page, many=True)
 
         return paginator.get_paginated_response(serializer.data)
+
 
     def post(self, request):
         serializer = UserSerializer(data=request.data)
@@ -311,6 +339,413 @@ class LoginView(APIView):
                 "refresh": str(refresh),
             },
             status=status.HTTP_200_OK,
+        )
+
+
+
+class ProjectTaskListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+
+        tasks = ProjectTask.objects.select_related(
+            "project",
+            "assigned_to",
+            "assigned_to__profiles",
+            "assigned_by",
+            "assigned_by__profiles",
+            "created_by",
+            "created_by__profiles",
+            "updated_by",
+            "updated_by__profiles"
+        ).all()
+
+   
+        is_deleted = request.query_params.get("is_deleted")
+
+        if is_deleted is not None:
+            if is_deleted.lower() in ["true", "1"]:
+                tasks = tasks.filter(is_deleted=True)
+            elif is_deleted.lower() in ["false", "0"]:
+                tasks = tasks.filter(is_deleted=False)
+        else:
+            tasks = tasks.filter(is_deleted=False)
+
+    
+        task_id = request.query_params.get("id")
+        if task_id:
+            tasks = tasks.filter(id=task_id)
+
+       
+        title = request.query_params.get("title")
+        if title:
+            tasks = tasks.filter(title__icontains=title)
+
+    
+        project_id = request.query_params.get("project_id")
+        if project_id:
+            tasks = tasks.filter(project_id=project_id)
+
+        
+        project_title = request.query_params.get("project_title")
+        if project_title:
+            tasks = tasks.filter(project__title__icontains=project_title)
+
+       
+        assigned_to = request.query_params.get("assigned_to")
+        if assigned_to:
+            tasks = tasks.filter(assigned_to_id=assigned_to)
+
+        
+        assigned_to_first_name = request.query_params.get("assigned_to_first_name")
+        if assigned_to_first_name:
+            tasks = tasks.filter(
+                assigned_to__first_name__icontains=assigned_to_first_name
+            )
+
+        
+        assigned_to_last_name = request.query_params.get("assigned_to_last_name")
+        if assigned_to_last_name:
+            tasks = tasks.filter(
+                assigned_to__last_name__icontains=assigned_to_last_name
+            )
+
+      
+        assigned_to_email = request.query_params.get("assigned_to_email")
+        if assigned_to_email:
+            tasks = tasks.filter(
+                assigned_to__email__icontains=assigned_to_email
+            )
+
+     
+        assigned_to_profile = request.query_params.get("assigned_to_profile")
+        if assigned_to_profile:
+            tasks = tasks.filter(
+                assigned_to__profiles__name__icontains=assigned_to_profile
+            )
+
+       
+        assigned_by = request.query_params.get("assigned_by")
+        if assigned_by:
+            tasks = tasks.filter(assigned_by_id=assigned_by)
+
+        
+        assigned_by_first_name = request.query_params.get("assigned_by_first_name")
+        if assigned_by_first_name:
+            tasks = tasks.filter(
+                assigned_by__first_name__icontains=assigned_by_first_name
+            )
+
+   
+        assigned_by_last_name = request.query_params.get("assigned_by_last_name")
+        if assigned_by_last_name:
+            tasks = tasks.filter(
+                assigned_by__last_name__icontains=assigned_by_last_name
+            )
+
+ 
+        assigned_by_email = request.query_params.get("assigned_by_email")
+        if assigned_by_email:
+            tasks = tasks.filter(
+                assigned_by__email__icontains=assigned_by_email
+            )
+
+    
+        start_date = request.query_params.get("start_date")
+        if start_date:
+            tasks = tasks.filter(start_date=start_date)
+
+   
+        completion_date = request.query_params.get("completion_date")
+        if completion_date:
+            tasks = tasks.filter(completion_date=completion_date)
+
+   
+        deadline_date = request.query_params.get("deadline_date")
+        if deadline_date:
+            tasks = tasks.filter(deadline_date=deadline_date)
+
+      
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            tasks = tasks.filter(status__iexact=status_filter)
+
+      
+        created_by = request.query_params.get("created_by")
+        if created_by:
+            tasks = tasks.filter(created_by_id=created_by)
+
+   
+        created_by_first_name = request.query_params.get("created_by_first_name")
+        if created_by_first_name:
+            tasks = tasks.filter(
+                created_by__first_name__icontains=created_by_first_name
+            )
+
+     
+        created_by_email = request.query_params.get("created_by_email")
+        if created_by_email:
+            tasks = tasks.filter(
+                created_by__email__icontains=created_by_email
+            )
+
+
+        updated_by = request.query_params.get("updated_by")
+        if updated_by:
+            tasks = tasks.filter(updated_by_id=updated_by)
+
+  
+        updated_by_first_name = request.query_params.get("updated_by_first_name")
+        if updated_by_first_name:
+            tasks = tasks.filter(
+                updated_by__first_name__icontains=updated_by_first_name
+            )
+
+   
+        updated_by_email = request.query_params.get("updated_by_email")
+        if updated_by_email:
+            tasks = tasks.filter(
+                updated_by__email__icontains=updated_by_email
+            )
+
+       
+        created_at = request.query_params.get("created_at")
+        if created_at:
+            tasks = tasks.filter(created_at__date=created_at)
+
+        updated_at = request.query_params.get("updated_at")
+        if updated_at:
+            tasks = tasks.filter(updated_at__date=updated_at)
+
+
+        search = request.query_params.get("search")
+
+        if search:
+            tasks = tasks.filter(
+                Q(title__icontains=search) |
+                Q(status__icontains=search) |
+                Q(project__title__icontains=search) |
+
+                Q(assigned_to__first_name__icontains=search) |
+                Q(assigned_to__last_name__icontains=search) |
+                Q(assigned_to__email__icontains=search) |
+                Q(assigned_to__profiles__name__icontains=search) |
+
+                Q(assigned_by__first_name__icontains=search) |
+                Q(assigned_by__last_name__icontains=search) |
+                Q(assigned_by__email__icontains=search) |
+
+                Q(created_by__first_name__icontains=search) |
+                Q(created_by__last_name__icontains=search) |
+                Q(created_by__email__icontains=search) |
+
+                Q(updated_by__first_name__icontains=search) |
+                Q(updated_by__last_name__icontains=search) |
+                Q(updated_by__email__icontains=search)
+            )
+
+        tasks = tasks.order_by("id").distinct()
+
+        serializer = ProjectTaskSerializer(tasks, many=True)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+
+        print("Logged-in User ID:", request.user.id)
+        print("Logged-in Username:", request.user.username)
+        print(
+            "Logged-in Profile:",
+            request.user.profiles.name if request.user.profiles else None
+        )
+
+        serializer = ProjectTaskSerializer(data=request.data)
+
+        if serializer.is_valid():
+
+            # Get the selected project from the request
+            project = serializer.validated_data["project"]
+
+            # Get the manager assigned to that project
+            assigned_by_user = project.manager
+
+            serializer.save(
+                created_by=request.user,
+                updated_by=request.user,
+                assigned_by=project.manager
+            )
+
+            return Response(
+                serializer.data,
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+class ProjectTaskDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, pk):
+        return ProjectTask.objects.filter(pk=pk).first()
+
+    def get(self, request, pk):
+        task = self.get_object(pk)
+
+        if task is None:
+            return Response({"error": "Task not found."}, status=404)
+
+        return Response(ProjectTaskSerializer(task).data, status=200)
+
+    def put(self, request, pk):
+        return self.update_task(request, pk, partial=False)
+
+    def patch(self, request, pk):
+        return self.update_task(request, pk, partial=True)
+
+    def update_task(self, request, pk, partial):
+        task = self.get_object(pk)
+
+        if task is None:
+            return Response({"error": "Task not found."}, status=404)
+
+        serializer = ProjectTaskSerializer(
+            task,
+            data=request.data,
+            partial=partial
+        )
+
+        if serializer.is_valid():
+            serializer.save(updated_by=request.user)
+            return Response(
+                {
+                    "message": "Task updated successfully.",
+                    "task": serializer.data
+                },
+                status=200
+            )
+
+        return Response(serializer.errors, status=400)
+
+    def delete(self, request, pk):
+        task = self.get_object(pk)
+
+        if task is None:
+            return Response({"error": "Task not found."}, status=404)
+
+        task.delete()
+        return Response(
+            {"message": "Task deleted successfully."},
+            status=200
+        )
+
+
+class ProjectTaskCommentListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        comments = ProjectTaskcomment.objects.select_related(
+            "project_task", "project", "commented_by"
+        ).all()
+
+        task_id = request.query_params.get("task_id")
+        project_id = request.query_params.get("project_id")
+        user_id = request.query_params.get("user_id")
+        search = request.query_params.get("search")
+
+        if task_id:
+            comments = comments.filter(project_task_id=task_id)
+
+        if project_id:
+            comments = comments.filter(project_id=project_id)
+
+        if user_id:
+            comments = comments.filter(commented_by_id=user_id)
+
+        if search:
+            comments = comments.filter(
+                Q(comment__icontains=search) |
+                Q(project_task__title__icontains=search) |
+                Q(project__title__icontains=search)
+            )
+
+        comments = comments.order_by("-created_at").distinct()
+
+        serializer = ProjectTaskCommentSerializer(comments, many=True)
+        return Response(serializer.data, status=200)
+
+    def post(self, request):
+        serializer = ProjectTaskCommentSerializer(data=request.data)
+
+        if serializer.is_valid():
+            comment = serializer.save(commented_by=request.user)
+            return Response(
+                {
+                    "message": "Comment added successfully.",
+                    "comment": ProjectTaskCommentSerializer(comment).data
+                },
+                status=201
+            )
+
+        return Response(serializer.errors, status=400)
+
+
+class ProjectTaskCommentDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, pk):
+        return ProjectTaskcomment.objects.filter(pk=pk).first()
+
+    def get(self, request, pk):
+        comment = self.get_object(pk)
+
+        if comment is None:
+            return Response({"error": "Comment not found."}, status=404)
+
+        return Response(ProjectTaskCommentSerializer(comment).data, status=200)
+
+    def put(self, request, pk):
+        return self.update_comment(request, pk, partial=False)
+
+    def patch(self, request, pk):
+        return self.update_comment(request, pk, partial=True)
+
+    def update_comment(self, request, pk, partial):
+        comment = self.get_object(pk)
+
+        if comment is None:
+            return Response({"error": "Comment not found."}, status=404)
+
+        serializer = ProjectTaskCommentSerializer(
+            comment,
+            data=request.data,
+            partial=partial
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "message": "Comment updated successfully.",
+                    "comment": serializer.data
+                },
+                status=200
+            )
+
+        return Response(serializer.errors, status=400)
+
+    def delete(self, request, pk):
+        comment = self.get_object(pk)
+
+        if comment is None:
+            return Response({"error": "Comment not found."}, status=404)
+
+        comment.delete()
+        return Response(
+            {"message": "Comment deleted successfully."},
+            status=200
         )
 
 
@@ -720,6 +1155,7 @@ class ClientRestoreView(APIView):
 # PROJECT LIST AND CREATE
 
 
+
 class ProjectListCreateView(generics.ListCreateAPIView):
     serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated]
@@ -728,25 +1164,39 @@ class ProjectListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         user = self.request.user
 
+        # 1. Authentication check
         if not user.is_authenticated:
             return Project.objects.none()
 
+      
         profile = getattr(user, "profiles", None)
 
         if profile is None:
             return Project.objects.none()
 
-        role = profile.name.strip().lower()
+        user_role = profile.name.strip().lower()
 
-        projects = Project.objects.filter(is_deleted=False)
 
-        if role in ["superadmin", "admin"]:
+        is_deleted = self.request.query_params.get(
+            "is_deleted", "false"
+        ).strip().lower()
+
+        if is_deleted == "true":
+            projects = Project.objects.filter(is_deleted=True)
+        elif is_deleted == "false":
+            projects = Project.objects.filter(is_deleted=False)
+        else:
+            return Project.objects.none()
+
+      
+        if user_role in ["superadmin", "admin"]:
             pass
-        elif role == "manager":
+        elif user_role == "manager":
             projects = projects.filter(manager=user)
         else:
             return Project.objects.none()
 
+      
         search = self.request.query_params.get("search", "").strip()
 
         if search:
@@ -762,30 +1212,87 @@ class ProjectListCreateView(generics.ListCreateAPIView):
                 Q(type__icontains=search)
             )
 
-        role = self.request.query_params.get("role", "").strip()
-        if role:
+       
+        manager_id = self.request.query_params.get("manager_id", "").strip()
+        if manager_id:
+            projects = projects.filter(manager_id=manager_id)
+
+      
+        manager_first_name = self.request.query_params.get(
+            "manager_first_name", ""
+        ).strip()
+        if manager_first_name:
             projects = projects.filter(
-                manager__profiles__name__iexact=role
+                manager__first_name__icontains=manager_first_name
+            )
+
+     
+        manager_last_name = self.request.query_params.get(
+            "manager_last_name", ""
+        ).strip()
+        if manager_last_name:
+            projects = projects.filter(
+                manager__last_name__icontains=manager_last_name
+            )
+
+        manager_email = self.request.query_params.get(
+            "manager_email", ""
+        ).strip()
+        if manager_email:
+            projects = projects.filter(
+                manager__email__iexact=manager_email
+            )
+
+  
+        client_id = self.request.query_params.get("client_id", "").strip()
+        if client_id:
+            projects = projects.filter(client_id=client_id)
+
+        client_first_name = self.request.query_params.get(
+            "client_first_name", ""
+        ).strip()
+        if client_first_name:
+            projects = projects.filter(
+                client__fname__icontains=client_first_name
+            )
+
+      
+        client_last_name = self.request.query_params.get(
+            "client_last_name", ""
+        ).strip()
+        if client_last_name:
+            projects = projects.filter(
+                client__lname__icontains=client_last_name
+            )
+
+       
+        client_email = self.request.query_params.get(
+            "client_email", ""
+        ).strip()
+        if client_email:
+            projects = projects.filter(
+                client__email__icontains=client_email
+            )
+
+       
+        project_status = self.request.query_params.get("status", "").strip()
+        if project_status:
+            projects = projects.filter(status__iexact=project_status)
+
+       
+        project_type = self.request.query_params.get("type", "").strip()
+        if project_type:
+            projects = projects.filter(type__iexact=project_type)
+
+      
+        manager_role = self.request.query_params.get("role", "").strip()
+        if manager_role:
+            projects = projects.filter(
+                manager__profiles__name__iexact=manager_role
             )
 
         return projects.order_by("created_at").distinct()
 
-    def perform_create(self, serializer):
-        project = serializer.save(
-            created_by=self.request.user,
-            updated_by=self.request.user,
-        )
-
-        try:
-            self.notification_results = send_project_notifications(project)
-        except Exception:
-            import logging
-            logging.exception("Project notification email failed.")
-
-            self.notification_results = {
-                "client": {"status": "failed"},
-                "manager": {"status": "failed"},
-            }
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
@@ -1304,4 +1811,33 @@ class ProjectAttachementDetailView(APIView):
         {"message": "Attachment deleted successfully."},
         status=status.HTTP_200_OK
     )
+
+class ProjectTaskRestoreView(APIView):
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+
+        project_task_ids = request.data.get("project_task_ids", [])
+
+        if not project_task_ids:
+            return Response(
+                {"error": "Please provide project_task_ids."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        tasks = ProjectTask.objects.filter(
+            id__in=project_task_ids,
+            is_deleted=True
+        )
+
+        restored_count = tasks.update(is_deleted=False)
+
+        return Response(
+            {
+                "message": "Project tasks restored successfully.",
+                "restored_count": restored_count
+            },
+            status=status.HTTP_200_OK
+        )
 

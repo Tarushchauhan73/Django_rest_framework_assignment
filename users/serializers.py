@@ -7,19 +7,91 @@ from django.db.models import Value
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
+import re
 from .models import Client, Profile, Project, ProjectAttachement 
 from .models import Project, ProjectAttachement, Client, User
 from .models import ProjectTask, ProjectTaskcomment
 User = get_user_model()
 
+
+class StrictStringField(serializers.CharField):
+
+    def to_internal_value(self, data):
+
+        if not isinstance(data, str):
+            raise serializers.ValidationError(
+                "Please enter a valid string, not a number."
+            )
+
+        value = super().to_internal_value(data)
+
+        if value.isdigit():
+            raise serializers.ValidationError(
+                "Please enter a valid string, not a number."
+            )
+
+        return value
+
+
+
+
+
 class ProfileSerializer(serializers.ModelSerializer):
-    role = serializers.CharField(source="name", read_only=True)
+
+    role = StrictStringField(
+        source="name",
+        required=True,
+        allow_null=False,
+        allow_blank=False
+    )
+
+    def validate_role(self, value):
+
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Role cannot be empty."
+            )
+
+        if value.lower() == "null":
+            raise serializers.ValidationError(
+                "Role cannot be null."
+            )
+
+        # Only alphabets and spaces are allowed
+        if not re.fullmatch(r"[A-Za-z ]+", value):
+            raise serializers.ValidationError(
+                "Role can contain only alphabets and spaces."
+            )
+
+        existing_profile = Profile.objects.filter(
+            name__iexact=value
+        )
+
+        if self.instance:
+            existing_profile = existing_profile.exclude(
+                id=self.instance.id
+            )
+
+        if existing_profile.exists():
+            raise serializers.ValidationError(
+                "This role already exists."
+            )
+
+        return value
 
     class Meta:
         model = Profile
         fields = ["id", "role", "is_active", "is_default"]
 
+    class Meta:
+        model = Profile
+        fields = ["id", "role", "is_active", "is_default"]
+
+
 class UserDetailSerializer(serializers.ModelSerializer):
+    
 
     class Meta:
         model = User
@@ -29,26 +101,60 @@ class UserDetailSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "email",
+          
         ]
         
+
+
+from django.utils.text import slugify
+
 class ClientSerializer(serializers.ModelSerializer):
+
+    fname = serializers.CharField(source="first_name")
+    lname = serializers.CharField(source="last_name")
+
+    contactno = serializers.CharField(
+        source="phone",
+        required=False,
+        allow_blank=True
+    )
+
+    address = serializers.CharField(
+        source="permanent_address",
+        required=False,
+        allow_blank=True
+    )
 
     created_by = UserDetailSerializer(read_only=True)
     updated_by = UserDetailSerializer(read_only=True)
 
     class Meta:
-        model = Client
-        fields = "__all__"
+        model = User
+        fields = [
+            "id",
+            "fname",
+            "lname",
+            "country",
+            "contactno",
+            "address",
+            "email",
+            "status",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        ]
+
         read_only_fields = [
             "id",
             "created_by",
-            "created_at",
             "updated_by",
+            "created_at",
             "updated_at",
         ]
 
     def validate(self, attrs):
-        for field in ["fname", "lname", "email"]:
+        for field in ["first_name", "last_name", "email"]:
             if self.instance is not None and field not in attrs:
                 continue
 
@@ -57,19 +163,78 @@ class ClientSerializer(serializers.ModelSerializer):
             if value is None or (
                 isinstance(value, str) and not value.strip()
             ):
+                error_field = {
+                    "first_name": "fname",
+                    "last_name": "lname",
+                    "email": "email",
+                }[field]
+
                 raise serializers.ValidationError({
-                    field: f"{field.replace('_', ' ').capitalize()} is required."
+                    error_field: f"{error_field.capitalize()} is required."
                 })
 
         return attrs
 
+    def create(self, validated_data):
+
+        client_profile = Profile.objects.get(name="client")
+        validated_data["profiles"] = client_profile
+
+        # Generate a unique username automatically
+        base_username = slugify(
+            validated_data["email"].split("@")[0]
+        ) or "client"
+
+        username = base_username[:150]
+        count = 1
+
+        while User.objects.filter(username=username).exists():
+            suffix = f"_{count}"
+            username = base_username[:150 - len(suffix)] + suffix
+            count += 1
+
+        validated_data["username"] = username
+
+        # Create account without an active password
+        user = User.objects.create(**validated_data)
+        user.set_unusable_password()
+        user.save()
+
+        return user
+
+
+class AssignedUserDetailsSerializer(serializers.ModelSerializer):
+
+    profile = serializers.SerializerMethodField()
+
+    def get_profile(self, obj):
+        return obj.profiles.name if obj.profiles else None
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "email",
+            "profile"
+        ]
+
+
 class UserSerializer(serializers.ModelSerializer):
+    first_name = StrictStringField(required=False)
+    last_name = StrictStringField(required=False)
+
     def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
 
             if self.instance:
                 self.fields["email"].required = False
 
+    created_by = AssignedUserDetailsSerializer(read_only=True)
+
+    updated_by = AssignedUserDetailsSerializer(read_only=True)
+    
     username = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -90,7 +255,10 @@ class UserSerializer(serializers.ModelSerializer):
         style={"input_type": "password"},
     )
 
-    profile = serializers.CharField(required=False, write_only=True)
+    profile = serializers.CharField(
+    required=False,
+    write_only=True
+)
 
     profile_id = serializers.PrimaryKeyRelatedField(
         queryset=Profile.objects.filter(is_active=True),
@@ -99,8 +267,35 @@ class UserSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    profiles_details = serializers.SerializerMethodField()
 
+    profiles = serializers.SerializerMethodField()
+
+    def get_profiles(self, obj):
+        if obj.profiles:
+            return {
+                "id": obj.profiles.id,
+                "role": obj.profiles.name,
+                "is_active": obj.profiles.is_active,
+                "is_default": obj.profiles.is_default,
+            }
+
+        return None
+
+    def validate_email(self, value):
+
+        value = value.strip().lower()
+
+        existing_user = User.objects.filter(email__iexact=value)
+
+        if self.instance:
+            existing_user = existing_user.exclude(id=self.instance.id)
+
+        if existing_user.exists():
+            raise serializers.ValidationError(
+                "A user with this email already exists."
+            )
+
+        return value
     def get_profiles_details(self, obj):
         if obj.profiles:
             return {
@@ -123,7 +318,6 @@ class UserSerializer(serializers.ModelSerializer):
             "password",
             "profiles",
             "profile",
-            "profiles_details",
             "profile_id",
             "date_of_birth",
             "gender",
@@ -132,11 +326,16 @@ class UserSerializer(serializers.ModelSerializer):
             "blood_group",
             "phone",
             "permanent_address",
+            "country",
             "current_address",
             "emergency_contact_name",
             "emergency_contact_number",
             "emergency_contact_relationship",
             "status",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = ["id"]
 
@@ -160,19 +359,36 @@ class UserSerializer(serializers.ModelSerializer):
         return value
     def validate_profile(self, value):
 
+        if not isinstance(value, str) or not value.strip():
+            raise serializers.ValidationError(
+                "Role must contain a valid string value."
+            )
+
+        value = value.strip()
+
+        if value.isdigit():
+            raise serializers.ValidationError(
+                "Role must contain a string value, not a number."
+            )
+
         if self.instance and self.instance.profiles:
             if self.instance.profiles.is_default:
                 raise serializers.ValidationError(
                     "Default profiles cannot be edited."
                 )
 
-        profile = Profile.objects.filter(role__iexact=value).first()
+        profile = Profile.objects.filter(
+            name__iexact=value,
+            is_active=True
+        ).first()
 
         if not profile:
-            raise serializers.ValidationError("Profile does not exist.")
+            raise serializers.ValidationError(
+                "Profile does not exist."
+            )
 
         return profile
-        
+            
     def create(self, validated_data):
         # Get the profile selected by the user.
         profile = validated_data.pop("profiles", None)
@@ -284,56 +500,49 @@ class AssignedUserDetailsSerializer(serializers.ModelSerializer):
             "last_name",
             "profile"
         ]
+class NestedProjectField(serializers.PrimaryKeyRelatedField):
 
+    def to_representation(self, value):
+        project = Project.objects.get(pk=value.pk)
+        return ProjectDetailsSerializer(project).data
+
+class NestedUserField(serializers.PrimaryKeyRelatedField):
+
+    def to_representation(self, value):
+        user = User.objects.get(pk=value.pk)
+        return AssignedUserDetailsSerializer(user).data
+    
 class ProjectTaskSerializer(serializers.ModelSerializer):
 
-    project = serializers.PrimaryKeyRelatedField(
+    title = StrictStringField()
+
+    project = NestedProjectField(
         queryset=Project.objects.all(),
         required=False
-)
-
-    project_details = ProjectDetailsSerializer(
-        source="project",
-        read_only=True
     )
 
-    
-    assigned_to = serializers.PrimaryKeyRelatedField(
+    assigned_to = NestedUserField(
         queryset=User.objects.all(),
         required=False
     )
 
-    assigned_to_details = AssignedUserDetailsSerializer(
-        source="assigned_to",
+    assigned_by = AssignedUserDetailsSerializer(
         read_only=True
     )
 
-    assigned_by = serializers.PrimaryKeyRelatedField(
+    created_by = AssignedUserDetailsSerializer(
         read_only=True
     )
 
-    assigned_by_details = AssignedUserDetailsSerializer(
-        source="assigned_by",
+    updated_by = AssignedUserDetailsSerializer(
         read_only=True
     )
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-    created_by = serializers.PrimaryKeyRelatedField(
-        read_only=True
-    )
-
-    created_by_details = AssignedUserDetailsSerializer(
-        source="created_by",
-        read_only=True
-    )
-
-    updated_by = serializers.PrimaryKeyRelatedField(
-        read_only=True
-    )
-
-    updated_by_details = AssignedUserDetailsSerializer(
-        source="updated_by",
-        read_only=True
-    )
+        
+        if self.instance:
+            self.fields["title"].required = False
 
     def validate_assigned_to(self, value):
 
@@ -350,7 +559,25 @@ class ProjectTaskSerializer(serializers.ModelSerializer):
             )
 
         return value
+    def validate_title(self, value):
 
+        value = value.strip()
+
+        existing_task = ProjectTask.objects.filter(
+            title__iexact=value
+        )
+
+        if self.instance:
+            existing_task = existing_task.exclude(
+                id=self.instance.id
+            )
+
+        if existing_task.exists():
+            raise serializers.ValidationError(
+                "A task with this title already exists."
+            )
+
+        return value
     def validate(self, attrs):
 
         start_date = attrs.get(
@@ -390,27 +617,15 @@ class ProjectTaskSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "title",
-
             "project",
-            "project_details",
-
             "assigned_to",
-            "assigned_to_details",
-
             "assigned_by",
-            "assigned_by_details",
-
             "start_date",
             "completion_date",
             "deadline_date",
             "status",
-
             "created_by",
-            "created_by_details",
-
             "updated_by",
-            "updated_by_details",
-
             "created_at",
             "updated_at"
         ]
@@ -424,7 +639,6 @@ class ProjectTaskSerializer(serializers.ModelSerializer):
             "updated_at"
         ]
 
-
 class ProjectTaskDetailsSerializer(serializers.ModelSerializer):
 
     class Meta:
@@ -437,37 +651,31 @@ class ProjectTaskDetailsSerializer(serializers.ModelSerializer):
             "deadline_date",
             "status"
         ]
+
+class NestedProjectTaskField(serializers.PrimaryKeyRelatedField):
+
+    def to_representation(self, value):
+        task = ProjectTask.objects.get(pk=value.pk)
+        return ProjectTaskDetailsSerializer(task).data
+    
+
+
 class ProjectTaskCommentSerializer(serializers.ModelSerializer):
 
-    commented_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    comment = StrictStringField()
 
-    commented_by_name = serializers.SerializerMethodField()
+    commented_by = AssignedUserDetailsSerializer(read_only=True),
 
-    project_task = serializers.PrimaryKeyRelatedField(
-        queryset=ProjectTask.objects.all()
+
+    project_task = NestedProjectTaskField(
+        queryset=ProjectTask.objects.all(),
+        required=False
     )
 
-    project_task_details = ProjectTaskDetailsSerializer(
-        source="project_task",
-        read_only=True
+    project = NestedProjectField(
+        queryset=Project.objects.all(),
+        required=False
     )
-
-    project = serializers.PrimaryKeyRelatedField(
-        queryset=Project.objects.all()
-    )
-
-    project_details = ProjectDetailsSerializer(
-        source="project",
-        read_only=True
-    )
-
-    def get_commented_by_name(self, obj):
-        if obj.commented_by:
-            return (
-                f"{obj.commented_by.first_name} "
-                f"{obj.commented_by.last_name}"
-            )
-        return None
 
     def validate(self, attrs):
         task = attrs.get(
@@ -493,18 +701,15 @@ class ProjectTaskCommentSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "commented_by",
-            "commented_by_name",
             "comment",
             "created_at",
             "updated_at",
             "project_task",
-            "project_task_details",
             "project",
-            "project_details",
-            
         ]
 
         read_only_fields = [
+            "id",
             "commented_by",
             "created_at",
             "updated_at"
@@ -677,6 +882,8 @@ class ProjectAttachementSerializer(serializers.ModelSerializer):
 
 
 class ProjectSerializer(serializers.ModelSerializer):
+    title = StrictStringField()
+    description = StrictStringField()
 
     client = ClientRelatedField(
         queryset=Client.objects.all(),
@@ -703,6 +910,26 @@ class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = "__all__"
+
+    def validate_title(self, value):
+
+        value = value.strip()
+
+        existing_project = Project.objects.filter(
+            title__iexact=value
+        )
+
+        if self.instance:
+            existing_project = existing_project.exclude(
+                id=self.instance.id
+            )
+
+        if existing_project.exists():
+            raise serializers.ValidationError(
+                "A project with this title already exists."
+            )
+
+        return value
 
     def create(self, validated_data):
         # Get uploaded files from validated data
@@ -816,8 +1043,7 @@ class ProjectSerializer(serializers.ModelSerializer):
 
         return value
 class ProjectDetailsSerializer(serializers.ModelSerializer):
-    client_name = serializers.SerializerMethodField()
-    manager_name = serializers.SerializerMethodField()
+    
 
     class Meta:
         model = Project

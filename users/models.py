@@ -14,11 +14,34 @@ class Profile(models.Model):
     def __str__(self):
         return self.name
 
+class BaseModel(models.Model):
 
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_created"
+    )
+
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="%(class)s_updated"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
 
 # Custom User Model
 
-class User(AbstractUser):
+class User(AbstractUser,BaseModel):
 
     class GenderChoices(models.TextChoices):
         MALE = "Male", "Male"
@@ -103,7 +126,7 @@ class User(AbstractUser):
 
     permanent_address = models.TextField(null=True, blank=True)
     current_address = models.TextField(null=True, blank=True)
-
+  
     emergency_contact_name = models.CharField(
         max_length=100,
         null=True,
@@ -127,6 +150,13 @@ class User(AbstractUser):
         choices=StatusChoices.choices,
         default=StatusChoices.ACTIVE,
     )
+      
+    country = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+    )
+    
 
     # OTP and request-limit fields
     attempt = models.PositiveIntegerField(default=0)
@@ -140,6 +170,8 @@ class User(AbstractUser):
         null=True,
         blank=True,
     )
+
+    
 
     otp = models.CharField(max_length=6, blank=True, default="")
 
@@ -159,7 +191,7 @@ class User(AbstractUser):
 
 # Client Model
 
-class Client(models.Model):
+class Client(BaseModel):
 
     class StatusChoices(models.TextChoices):
         ACTIVE = "Active", "Active"
@@ -183,25 +215,7 @@ class Client(models.Model):
         default=StatusChoices.ACTIVE,
     )
 
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="clients_created",
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    updated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="clients_updated",
-    )
-
-    updated_at = models.DateTimeField(auto_now=True)
+    
 
     def __str__(self):
         return f"{self.fname} {self.lname}".strip()
@@ -210,7 +224,7 @@ class Client(models.Model):
 
 # Project Model
 
-class Project(models.Model):
+class Project(BaseModel):
 
     class ProjectType(models.TextChoices):
         WEB = "Web", "Web"
@@ -260,26 +274,7 @@ class Project(models.Model):
         related_name="managed_projects",
     )
 
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="projects_created",
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    updated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="projects_updated",
-    )
-
-    updated_at = models.DateTimeField(auto_now=True)
-
+    
     is_deleted = models.BooleanField(default=False)
 
     deleted_by = models.ForeignKey(
@@ -424,3 +419,4 @@ class ProjectTaskcomment(models.Model):
 
     def __str__(self):
         return f"Comment by {self.commented_by.email if self.commented_by else 'Unknown'} on task {self.project_task.title}"
+

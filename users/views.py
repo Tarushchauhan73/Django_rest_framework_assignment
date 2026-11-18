@@ -24,7 +24,7 @@ from rest_framework import status
 
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .utils import send_project_notifications
+
 from .models import Project, ProjectAttachement, ProjectTask, ProjectTaskcomment
 from .serializers import ProjectAttachementSerializer, ProjectTaskCommentSerializer, ProjectTaskSerializer
 from .models import Client, Project, Profile
@@ -53,10 +53,20 @@ User = get_user_model()
 # POST /api/users/
 
 class UserListCreateView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         users = User.objects.all()
+
+        is_client = request.query_params.get("is_client")
+
+        if is_client is not None:
+
+            if is_client.lower() == "true":
+                users = users.filter(profiles__name__iexact="client")
+
+            elif is_client.lower() == "false":
+                users = users.exclude(profiles__name__iexact="client")
 
         search = request.query_params.get("search", "").strip()
 
@@ -67,7 +77,6 @@ class UserListCreateView(APIView):
             users = users.filter(status__iexact="Active")
 
         else:
-          
             users = users.filter(status="Active")
 
             if search:
@@ -81,13 +90,11 @@ class UserListCreateView(APIView):
                     Q(profiles__name__icontains=search)
                 )
 
-      
         profile_id = request.query_params.get("profile_id")
 
         if profile_id:
             users = users.filter(profiles_id=profile_id)
 
-     
         role = request.query_params.get("role")
 
         if role:
@@ -95,7 +102,6 @@ class UserListCreateView(APIView):
                 profiles__name__iexact=role.strip()
             )
 
-        
         first_name = request.query_params.get("first_name")
 
         if first_name:
@@ -103,7 +109,6 @@ class UserListCreateView(APIView):
                 first_name__icontains=first_name
             )
 
-      
         last_name = request.query_params.get("last_name")
 
         if last_name:
@@ -111,19 +116,16 @@ class UserListCreateView(APIView):
                 last_name__icontains=last_name
             )
 
-        
         email = request.query_params.get("email")
 
         if email:
             users = users.filter(email__icontains=email)
 
-    
         phone = request.query_params.get("phone")
 
         if phone:
             users = users.filter(phone__icontains=phone)
 
-        
         nationality = request.query_params.get("nationality")
 
         if nationality:
@@ -131,7 +133,6 @@ class UserListCreateView(APIView):
                 nationality__icontains=nationality
             )
 
-    
         gender = request.query_params.get("gender")
 
         if gender:
@@ -139,7 +140,6 @@ class UserListCreateView(APIView):
 
         users = users.order_by("id").distinct()
 
-      
         paginator = PageNumberPagination()
         paginator.page_size = 100
 
@@ -151,13 +151,14 @@ class UserListCreateView(APIView):
 
         return paginator.get_paginated_response(serializer.data)
 
-
     def post(self, request):
         serializer = UserSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        user = serializer.save()
-
+        user = serializer.save(
+            created_by=request.user,
+            updated_by=request.user
+        )
         try:
             send_welcome_email(user)
         except Exception:
@@ -177,13 +178,24 @@ class UserListCreateView(APIView):
 # DELETE /api/users/<pk>/
 
 class UserDetailView(APIView):
-    permission_classes = [AllowAny]
-
+    permission_classes = [IsAuthenticated]
     def get_object(self, pk):
-        return User.objects.filter(
+
+        if str(pk).lower() == "null" or str(pk) == "0":
+            raise NotFound("Invalid user URL.")
+
+        if not str(pk).isdigit():
+            raise NotFound("Invalid user URL.")
+
+        user = User.objects.filter(
             pk=pk,
             status="Active",
         ).first()
+
+        if user is None:
+            raise NotFound("User not found.")
+
+        return user
 
     def get(self, request, pk):
         user = self.get_object(pk)
@@ -200,7 +212,17 @@ class UserDetailView(APIView):
         return self.update_user(request, pk, partial=False)
 
     def patch(self, request, pk):
-        return self.update_user(request, pk, partial=True)
+        user = self.get_object(pk)
+
+        user.status = "Inactive"
+        user.updated_by = request.user
+
+        user.save(update_fields=["status", "updated_by", "updated_at"])
+
+        return Response(
+            {"message": "User deleted successfully."},
+            status=status.HTTP_200_OK
+        )
 
     def update_user(self, request, pk, partial):
         user = self.get_object(pk)
@@ -221,25 +243,10 @@ class UserDetailView(APIView):
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    def delete(self, request, pk):
-        user = self.get_object(pk)
-
-        if user is None:
-            return Response(
-                {"error": "User not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        user.status = "Inactive"
-        user.save(update_fields=["status"])
-
-        return Response(
-            {"message": "User deleted successfully."},
-            status=status.HTTP_200_OK,
-        )
+    
 
 class UserRestoreView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated   ]
 
     def patch(self, request, pk=None):
         # Bulk restore
@@ -671,7 +678,7 @@ class ProjectTaskCommentListCreateAPIView(APIView):
                 Q(project__title__icontains=search)
             )
 
-        comments = comments.order_by("-created_at").distinct()
+        comments = comments.order_by("created_at").distinct()
 
         serializer = ProjectTaskCommentSerializer(comments, many=True)
         return Response(serializer.data, status=200)
@@ -856,7 +863,7 @@ class ForgotPasswordView(APIView):
             status="Active",
         ).first()
 
-         # Do not reveal whether the email exists.
+        
         if user is not None:
             check_otp_request_limit(user)
 
@@ -948,11 +955,15 @@ class ResetPasswordView(APIView):
 # POST /api/clients/
 # JWT authentication required
 
+
 class ClientListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        clients = Client.objects.all()
+
+        clients = User.objects.filter(
+            profiles__name="client"
+        )
 
         fname = request.query_params.get("fname")
         lname = request.query_params.get("lname")
@@ -963,50 +974,72 @@ class ClientListCreateAPIView(APIView):
         client_status = request.query_params.get("status")
 
         if fname:
-            clients = clients.filter(fname__icontains=fname)
+            clients = clients.filter(
+                first_name__icontains=fname
+            )
 
         if lname:
-            clients = clients.filter(lname__icontains=lname)
+            clients = clients.filter(
+                last_name__icontains=lname
+            )
 
         if email:
-            clients = clients.filter(email__icontains=email)
+            clients = clients.filter(
+                email__icontains=email
+            )
 
         if contactno:
-            clients = clients.filter(contactno__icontains=contactno)
+            clients = clients.filter(
+                phone__icontains=contactno
+            )
 
         if country:
-            clients = clients.filter(country__icontains=country)
+            clients = clients.filter(
+                country__icontains=country
+            )
 
         if address:
-            clients = clients.filter(address__icontains=address)
+            clients = clients.filter(
+                permanent_address__icontains=address
+            )
 
         if client_status:
-            clients = clients.filter(status__iexact=client_status)
+            clients = clients.filter(
+                status__iexact=client_status
+            )
 
         # General search across multiple fields
         search = request.query_params.get("search")
 
         if search:
             clients = clients.filter(
-                  Q(fname__icontains=search)
-                 | Q(lname__icontains=search)
+                Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
                 | Q(email__icontains=search)
-                | Q(contactno__icontains=search)
+                | Q(phone__icontains=search)
                 | Q(country__icontains=search)
-                | Q(address__icontains=search)
+                | Q(permanent_address__icontains=search)
             )
 
-        # Remove duplicates and order results
         clients = clients.order_by("id").distinct()
 
         paginator = PageNumberPagination()
         paginator.page_size = 100
-        page = paginator.paginate_queryset(clients, request, view=self)
+
+        page = paginator.paginate_queryset(
+            clients,
+            request,
+            view=self
+        )
 
         serializer = ClientSerializer(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
+
+        return paginator.get_paginated_response(
+            serializer.data
+        )
 
     def post(self, request):
+
         serializer = ClientSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -1021,58 +1054,73 @@ class ClientListCreateAPIView(APIView):
         )
 
 
-# CLIENT DETAIL, UPDATE AND DELETE
-# GET / PUT / PATCH / DELETE /api/clients/<pk>/
-# JWT authentication required
 
 class ClientDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        return Client.objects.filter(pk=pk).first()
+
+        if str(pk).lower() == "null" or str(pk) == "0":
+            raise NotFound("Invalid client URL.")
+
+        if not str(pk).isdigit():
+            raise NotFound("Invalid client URL.")
+
+        client = User.objects.filter(
+            pk=pk,
+            profiles__name="client"
+        ).first()
+
+        if client is None:
+            raise NotFound("Client not found.")
+
+        return client
 
     def get(self, request, pk):
         client = self.get_object(pk)
 
-        if client is None:
-            return Response(
-                {"error": "Client not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        return Response(ClientSerializer(client).data)
+        serializer = ClientSerializer(client)
+        return Response(serializer.data)
 
     def put(self, request, pk):
         return self.update_client(request, pk, partial=False)
 
     def patch(self, request, pk):
-        return self.update_client(request, pk, partial=True)
+        client = self.get_object(pk)
+
+        client.status = "Inactive"
+        client.updated_by = request.user
+
+        client.save(update_fields=["status", "updated_by", "updated_at"])
+
+        return Response(
+            {"message": "Client deleted successfully."},
+            status=status.HTTP_200_OK
+    )
 
     def update_client(self, request, pk, partial):
         client = self.get_object(pk)
-
-        if client is None:
-            return Response(
-                {"error": "Client not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
 
         serializer = ClientSerializer(
             client,
             data=request.data,
             partial=partial,
         )
+
         serializer.is_valid(raise_exception=True)
         serializer.save(updated_by=request.user)
 
         return Response(serializer.data)
 
+
 class ClientDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pk):
-        client = Client.objects.filter(
+
+        client = User.objects.filter(
             pk=pk,
+            profiles__name="client",
             status="Active"
         ).first()
 
@@ -1091,10 +1139,12 @@ class ClientDetailView(APIView):
             status=status.HTTP_200_OK
         )
 
+
 class ClientRestoreView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk=None):
+
         # Bulk restore
         if pk is None:
             client_ids = request.data.get("client_ids")
@@ -1105,8 +1155,9 @@ class ClientRestoreView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            clients = Client.objects.filter(
+            clients = User.objects.filter(
                 pk__in=client_ids,
+                profiles__name__iexact="client",
                 status="Inactive"
             )
 
@@ -1122,7 +1173,7 @@ class ClientRestoreView(APIView):
                 {
                     "message": "Clients restored successfully.",
                     "restored_count": len(restored_clients),
-                    "clients": ClientSerializer(
+                    "clients": UserSerializer(
                         restored_clients, many=True
                     ).data
                 },
@@ -1130,8 +1181,9 @@ class ClientRestoreView(APIView):
             )
 
         # Single restore
-        client = Client.objects.filter(
+        client = User.objects.filter(
             pk=pk,
+            profiles__name__iexact="client",
             status="Inactive"
         ).first()
 
@@ -1148,13 +1200,10 @@ class ClientRestoreView(APIView):
         return Response(
             {
                 "message": "Client restored successfully.",
-                "client": ClientSerializer(client).data
+                "client": UserSerializer(client).data
             },
             status=status.HTTP_200_OK
         )
-# PROJECT LIST AND CREATE
-
-
 
 class ProjectListCreateView(generics.ListCreateAPIView):
     serializer_class = ProjectSerializer
@@ -1293,6 +1342,11 @@ class ProjectListCreateView(generics.ListCreateAPIView):
 
         return projects.order_by("created_at").distinct()
 
+    def perform_create(self, serializer):
+
+        project = serializer.save()
+
+        self.notification_results = send_project_notifications(project)
 
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
@@ -1494,10 +1548,18 @@ class ProfileDetailView(APIView):
     permission_classes = [AllowAny]
 
     def get_object(self, pk):
+
+        if str(pk).lower() == "null" or str(pk) == "0":
+            raise NotFound("Invalid profile URL.")
+
+        if not str(pk).isdigit():
+            raise NotFound("Invalid profile URL.")
+
         try:
             return Profile.objects.get(pk=pk)
+
         except Profile.DoesNotExist:
-            return None
+            raise NotFound("Profile not found.")
 
     def get(self, request, pk):
         profile = self.get_object(pk)
@@ -1575,6 +1637,13 @@ class ProjectDetailView(APIView):
         return Project.objects.filter(is_deleted=False)
 
     def get_object(self, pk):
+
+        if str(pk).lower() == "null" or str(pk) == "0":
+            raise NotFound("Invalid project URL.")
+
+        if not str(pk).isdigit():
+            raise NotFound("Invalid project URL.")
+
         project = self.get_queryset().filter(pk=pk).first()
 
         if project is None:
@@ -1592,12 +1661,17 @@ class ProjectDetailView(APIView):
 
         serializer = self.serializer_class(
             project,
-            data=request.data
+            data=request.data,
+            partial=True
         )
+
         serializer.is_valid(raise_exception=True)
         serializer.save(updated_by=request.user)
 
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK
+        )
 
     def patch(self, request, pk):
         project = self.get_object(pk)

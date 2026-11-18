@@ -4,8 +4,21 @@ from . import views
 from .views import ClientRestoreView, ProfileListView, ProjectRestoreView, UserRestoreView
 
 urlpatterns = [
-    path("users/", views.UserListCreateView.as_view(), name="user-list-create"),
-    path("users/<int:pk>/", views.UserDetailView.as_view(), name="user-detail"),
+path("users/", views.UserListCreateView.as_view(), name="user-list-create"),
+
+# User restore URL must come before the dynamic URL
+path(
+    "users/restore/",
+    views.UserRestoreView.as_view(),
+    name="user-restore"
+),
+
+# User detail URL
+path(
+    "users/<str:pk>/",
+    views.UserDetailView.as_view(),
+    name="user-detail"
+),
 
     path("login/", views.LoginView.as_view(), name="login"),
 
@@ -14,18 +27,42 @@ urlpatterns = [
     path("forgot-password/", views.ForgotPasswordView.as_view(), name="forgot-password"),
     path("reset-password/", views.ResetPasswordView.as_view(), name="reset-password"),
 
-    path("clients/", views.ClientListCreateAPIView.as_view(), name="client-list-create"),
-   path(
-    "clients/<int:pk>/",
-    views.ClientDetailView.as_view(),
+    path(
+    "clients/",
+    views.ClientListCreateAPIView.as_view(),
+    name="client-list-create"
+),
+
+# Single client restore
+path(
+    "clients/restore/<int:pk>/",
+    views.ClientRestoreView.as_view(),
+    name="client-restore"
+),
+
+# Bulk client restore
+path(
+    "clients/restore/",
+    views.ClientRestoreView.as_view(),
+    name="client-bulk-restore"
+),
+
+# Client detail URL must come after restore URLs
+path(
+    "clients/<str:pk>/",
+    views.ClientDetailAPIView.as_view(),
     name="client-detail"
 ),
 
     path("projects/", views.ProjectListCreateView.as_view(), name="project-list-create"),
-    path("projects/<int:pk>/", views.ProjectDetailView.as_view(), name="project-detail"),
+  path(
+    "projects/<str:pk>/",
+    views.ProjectDetailView.as_view(),
+    name="project-detail"
+),
 
     path("profiles/", ProfileListView.as_view(), name="profile-list-create"),
-    path("profiles/<int:pk>/", views.ProfileDetailView.as_view(), name="profile-detail"),
+    path("profiles/<str:pk>/", views.ProfileDetailView.as_view()),
 
 
 path(
@@ -40,17 +77,7 @@ path(
 ),
 
 # Single restore
-path(
-    "users/restore/<int:pk>/",
-    views.UserRestoreView.as_view(),
-    name="user-restore"
-),
 
-path(
-    "clients/restore/<int:pk>/",
-    views.ClientRestoreView.as_view(),
-    name="client-restore"
-),
 
 path(
     "projects/restore/<int:pk>/",

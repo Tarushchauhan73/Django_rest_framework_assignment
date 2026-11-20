@@ -108,6 +108,29 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
 from django.utils.text import slugify
 
+
+class OldClientSerializer(serializers.ModelSerializer):
+
+    created_by = UserDetailSerializer(read_only=True)
+    updated_by = UserDetailSerializer(read_only=True)
+
+    class Meta:
+        model = Client
+        fields = [
+            "id",
+            "fname",
+            "lname",
+            "country",
+            "contactno",
+            "address",
+            "email",
+            "status",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        ]
+        
 class ClientSerializer(serializers.ModelSerializer):
 
     fname = serializers.CharField(source="first_name")
@@ -404,12 +427,11 @@ class UserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "profile_id": "Default Standard profile not found."
                 })
-
         # Generate password if not provided.
         password = validated_data.pop("password", None)
 
         if not password:
-            email = validated_data.get("email", "")
+            email = validated_data.get("email", "").strip().lower()
             password = email.split("@")[0] + "@123"
 
         user = User(**validated_data)
@@ -578,6 +600,38 @@ class ProjectTaskSerializer(serializers.ModelSerializer):
             )
 
         return value
+    
+    
+    def validate_status(self, value):
+        from .models import ProjectTaskStatus
+
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Task status cannot be empty."
+            )
+
+        task_status = ProjectTaskStatus.objects.filter(
+            name__iexact=value
+        ).first()
+
+        if task_status:
+            if not task_status.is_active:
+                raise serializers.ValidationError(
+                    "This task status is inactive."
+                )
+
+            return task_status.name
+
+        task_status = ProjectTaskStatus.objects.create(
+            name=value,
+            is_active=True
+        )
+
+        return task_status.name
+
+    
     def validate(self, attrs):
 
         start_date = attrs.get(
@@ -930,6 +984,66 @@ class ProjectSerializer(serializers.ModelSerializer):
             )
 
         return value
+    
+    
+    def validate_type(self, value):
+        from .models import ProjectType
+
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Project type cannot be empty."
+            )
+
+        project_type = ProjectType.objects.filter(
+            name__iexact=value
+        ).first()
+
+        if project_type:
+            if not project_type.is_active:
+                raise serializers.ValidationError(
+                    "This project type is inactive."
+                )
+
+            return project_type.name
+
+        project_type = ProjectType.objects.create(
+            name=value,
+            is_active=True
+        )
+
+        return project_type.name
+
+
+    def validate_status(self, value):
+        from .models import ProjectStatus
+
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "Project status cannot be empty."
+            )
+
+        project_status = ProjectStatus.objects.filter(
+            name__iexact=value
+        ).first()
+
+        if project_status:
+            if not project_status.is_active:
+                raise serializers.ValidationError(
+                    "This project status is inactive."
+                )
+
+            return project_status.name
+
+        project_status = ProjectStatus.objects.create(
+            name=value,
+            is_active=True
+        )
+
+        return project_status.name
 
     def create(self, validated_data):
         # Get uploaded files from validated data

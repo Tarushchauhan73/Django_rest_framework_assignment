@@ -1,0 +1,26 @@
+$kind: http-request
+url: http://127.0.0.1:8000/api/login/
+method: POST
+body:
+  type: json
+  content: |-
+    {
+      "username": "rahul_sharma01",
+      "first_name": "Rahul",
+      "last_name": "Sharma",
+      "email": "shivamsaini8322@gmail.com",
+      "password": "shivam@123",
+      "profiles": "Developer",
+      "date_of_birth": "2002-05-14",
+      "gender": "Male",
+      "nationality": "Indian",
+      "blood_group": "B+",
+      "phone": "9876501234",
+      "permanent_address": "24 Green Park, Chandigarh, Punjab, India",
+      "current_address": "Sector 35, Chandigarh, India",
+      "emergency_contact_name": "Amit Sharma",
+      "emergency_contact_number": "9876505678",
+      "emergency_contact_relationship": "Brother",
+      "status": "Active"
+    }
+order: 2000

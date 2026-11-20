@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.exceptions import NotFound
 from django.shortcuts import get_object_or_404
@@ -26,7 +26,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Project, ProjectAttachement, ProjectTask, ProjectTaskcomment
-from .serializers import ProjectAttachementSerializer, ProjectTaskCommentSerializer, ProjectTaskSerializer
+from .serializers import OldClientSerializer, ProjectAttachementSerializer, ProjectTaskCommentSerializer, ProjectTaskSerializer
 from .models import Client, Project, Profile
 from .serializers import (
     UserSerializer,
@@ -52,11 +52,39 @@ User = get_user_model()
 # GET  /api/users/
 # POST /api/users/
 
+from rest_framework.exceptions import PermissionDenied
+
+
+def check_delete_permission(request):
+
+    profile = getattr(request.user, "profiles", None)
+
+    if profile is None:
+        raise PermissionDenied("User profile not found.")
+
+    user_role = profile.name.strip().lower()
+
+    if user_role not in ["superadmin", "admin"]:
+        raise PermissionDenied(
+            "You do not have permission to delete data. "
+            "Only superadmin and admin can delete data."
+        )
+
+
+
 class UserListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        users = User.objects.all()
+
+        # Login-based data access
+        if (
+            request.user.profiles
+            and request.user.profiles.name.strip().lower() == "superadmin"
+        ):
+            users = User.objects.all()
+        else:
+            users = User.objects.filter(id=request.user.id)
 
         is_client = request.query_params.get("is_client")
 
@@ -147,28 +175,54 @@ class UserListCreateView(APIView):
             users, request, view=self
         )
 
-        serializer = UserSerializer(page, many=True)
+        serializer = UserSerializer(
+            page,
+            many=True,
+            context={"request": request}
+        )
 
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = UserSerializer(data=request.data)
+
+        # Only Superadmin and Admin can create users
+        profile_name = ""
+
+        if request.user.profiles:
+            profile_name = request.user.profiles.name.strip().lower()
+
+        if profile_name not in ["superadmin", "admin"]:
+            return Response(
+                {
+                    "message": "You do not have permission to create users."
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = UserSerializer(
+            data=request.data,
+            context={"request": request}
+        )
+
         serializer.is_valid(raise_exception=True)
 
         user = serializer.save(
             created_by=request.user,
             updated_by=request.user
         )
+
         try:
             send_welcome_email(user)
         except Exception:
             pass
 
         return Response(
-            UserSerializer(user).data,
+            UserSerializer(
+                user,
+                context={"request": request}
+            ).data,
             status=status.HTTP_201_CREATED,
         )
-
 
 
 # USER DETAIL, UPDATE AND SOFT DELETE
@@ -179,6 +233,7 @@ class UserListCreateView(APIView):
 
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated]
+
     def get_object(self, pk):
 
         if str(pk).lower() == "null" or str(pk) == "0":
@@ -187,22 +242,36 @@ class UserDetailView(APIView):
         if not str(pk).isdigit():
             raise NotFound("Invalid user URL.")
 
-        user = User.objects.filter(
-            pk=pk,
-            status="Active",
-        ).first()
+        # Superadmin can access all users
+        if (
+            self.request.user.profiles
+            and self.request.user.profiles.name.strip().lower() == "superadmin"
+        ):
+            user = User.objects.filter(
+                pk=pk,
+                status="Active"
+            ).first()
+
+        # Other profiles can access only their own record
+        else:
+            user = User.objects.filter(
+                pk=pk,
+                id=self.request.user.id,
+                status="Active"
+            ).first()
 
         if user is None:
-            raise NotFound("User not found.")
+            raise NotFound("You are not authorized to access this user.")
 
         return user
+
 
     def get(self, request, pk):
         user = self.get_object(pk)
 
         if user is None:
             return Response(
-                {"error": "User not found."},
+                {"error": "you are not authorized to access this user."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -211,18 +280,45 @@ class UserDetailView(APIView):
     def put(self, request, pk):
         return self.update_user(request, pk, partial=False)
 
+  
     def patch(self, request, pk):
+
+        # Get logged-in user's profile
+        profile = getattr(request.user, "profiles", None)
+
+        if profile is None:
+            return Response(
+                {"message": "User profile not found."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        user_role = profile.name.strip().lower()
+
+        # Only superadmin and admin can delete users
+        if user_role not in ["superadmin", "admin"]:
+            return Response(
+                {
+                    "message": "You do not have permission to delete users. Only superadmin and admin can delete users."
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get user to be deleted
         user = self.get_object(pk)
 
+        # Soft delete user
         user.status = "Inactive"
         user.updated_by = request.user
 
-        user.save(update_fields=["status", "updated_by", "updated_at"])
+        user.save(
+            update_fields=["status", "updated_by", "updated_at"]
+        )
 
         return Response(
             {"message": "User deleted successfully."},
             status=status.HTTP_200_OK
         )
+
 
     def update_user(self, request, pk, partial):
         user = self.get_object(pk)
@@ -366,6 +462,22 @@ class ProjectTaskListCreateAPIView(APIView):
             "updated_by",
             "updated_by__profiles"
         ).all()
+        # Get logged-in user's profile
+        profile = getattr(request.user, "profiles", None)
+
+        if profile is None:
+            return Response(
+                {"error": "User profile not found."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        user_role = profile.name.strip().lower()
+
+        # Client can see tasks only from their assigned projects
+        if user_role == "client":
+            tasks = tasks.filter(
+        project__client__email__iexact=request.user.email
+    )
 
    
         is_deleted = request.query_params.get("is_deleted")
@@ -610,7 +722,24 @@ class ProjectTaskDetailAPIView(APIView):
         return self.update_task(request, pk, partial=False)
 
     def patch(self, request, pk):
-        return self.update_task(request, pk, partial=True)
+        check_delete_permission(request)
+
+        project = self.get_object(pk)
+
+        if project is None:
+            return Response(
+                {"error": "Project not found."},
+                status=404
+            )
+
+        project.is_deleted = True
+        project.save(update_fields=["is_deleted"])
+
+        return Response(
+            {"message": "Project deleted successfully."},
+            status=200
+        )
+
 
     def update_task(self, request, pk, partial):
         task = self.get_object(pk)
@@ -636,13 +765,17 @@ class ProjectTaskDetailAPIView(APIView):
 
         return Response(serializer.errors, status=400)
 
+
     def delete(self, request, pk):
+        check_delete_permission(request)
+
         task = self.get_object(pk)
 
         if task is None:
             return Response({"error": "Task not found."}, status=404)
 
         task.delete()
+
         return Response(
             {"message": "Task deleted successfully."},
             status=200
@@ -651,12 +784,89 @@ class ProjectTaskDetailAPIView(APIView):
 
 class ProjectTaskCommentListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    
+    
+    def get_comment_object(self, pk, request):
 
-    def get(self, request):
+            # Validate comment ID
+            if str(pk).strip().lower() in ["null", "none", "0", ""]:
+                raise NotFound(
+                    "Invalid URL. Please provide a valid comment ID."
+                )
+
+            if not str(pk).isdigit():
+                raise NotFound(
+                    "Invalid URL. Please provide a valid comment ID."
+                )
+
+            # Get comment
+            comment = ProjectTaskcomment.objects.select_related(
+                "project_task", "project", "commented_by"
+            ).filter(id=pk).first()
+
+            if comment is None:
+                raise NotFound(
+                    "Project task comment not found."
+                )
+
+            # Check logged-in user's profile
+            profile = getattr(request.user, "profiles", None)
+
+            if profile is None:
+                raise PermissionDenied(
+                    "User profile not found."
+                )
+
+            user_role = profile.name.strip().lower()
+
+            # Check client ownership
+            if user_role == "client":
+                if not comment.project.client or (
+                    comment.project.client.email.lower() != request.user.email.lower()
+                ):
+                    raise PermissionDenied(
+                        "You can only access your own data."
+                    )
+
+            return comment
+
+    # GET all comments
+    def get(self, request, pk=None):
+
+        # If comment ID is provided, get single comment
+        if pk is not None:
+            comment = self.get_comment_object(pk, request)
+
+            serializer = ProjectTaskCommentSerializer(comment)
+
+            return Response(
+                serializer.data,
+                status=200
+            )
+
+        # Get all comments
         comments = ProjectTaskcomment.objects.select_related(
             "project_task", "project", "commented_by"
         ).all()
 
+        # Get logged-in user's profile
+        profile = getattr(request.user, "profiles", None)
+
+        if profile is None:
+            return Response(
+                {"error": "User profile not found."},
+                status=403
+            )
+
+        user_role = profile.name.strip().lower()
+
+        # Client can see only their project's comments
+        if user_role == "client":
+            comments = comments.filter(
+                project__client__email__iexact=request.user.email
+            )
+
+        # Query parameters
         task_id = request.query_params.get("task_id")
         project_id = request.query_params.get("project_id")
         user_id = request.query_params.get("user_id")
@@ -680,14 +890,90 @@ class ProjectTaskCommentListCreateAPIView(APIView):
 
         comments = comments.order_by("created_at").distinct()
 
-        serializer = ProjectTaskCommentSerializer(comments, many=True)
+        serializer = ProjectTaskCommentSerializer(
+            comments,
+            many=True
+        )
+
         return Response(serializer.data, status=200)
+
+    # POST new comment
+    def post(self, request):
+
+        serializer = ProjectTaskCommentSerializer(data=request.data)
+
+        if serializer.is_valid():
+
+            project_task_id = request.data.get("project_task_id")
+
+            if not project_task_id or str(project_task_id).lower() in [
+                "null", "none", "0"
+            ]:
+                return Response(
+                    {
+                        "message": "Invalid project task ID. Please provide a valid ID."
+                    },
+                    status=400
+                )
+
+            project_task = get_object_or_404(
+                ProjectTask,
+                id=project_task_id
+            )
+
+            # Client can comment only on their own project's tasks
+            profile = getattr(request.user, "profiles", None)
+
+            if profile is None:
+                return Response(
+                    {"error": "User profile not found."},
+                    status=403
+                )
+
+            user_role = profile.name.strip().lower()
+
+            if user_role == "client":
+                if project_task.project.client.email.lower() != request.user.email.lower():
+                    return Response(
+                        {"message": "You can only access your own data."},
+                        status=403
+                    )
+
+            comment = serializer.save(
+                commented_by=request.user,
+                project_task=project_task,
+                project=project_task.project
+            )
+
+            return Response(
+                {
+                    "message": "Comment added successfully.",
+                    "comment": ProjectTaskCommentSerializer(comment).data
+                },
+                status=201
+            )
+
+        return Response(serializer.errors, status=400)
+
+
 
     def post(self, request):
         serializer = ProjectTaskCommentSerializer(data=request.data)
 
         if serializer.is_valid():
-            comment = serializer.save(commented_by=request.user)
+            project_task_id = request.data.get("project_task_id")
+
+            project_task = get_object_or_404(
+                ProjectTask,
+                id=project_task_id
+            )
+
+            comment = serializer.save(
+                commented_by=request.user,
+                project_task=project_task,
+                project=project_task.project
+            )
+
             return Response(
                 {
                     "message": "Comment added successfully.",
@@ -961,10 +1247,38 @@ class ClientListCreateAPIView(APIView):
 
     def get(self, request):
 
+       
+    # Check logged-in user's profile
+        profile = getattr(request.user, "profiles", None)
+
+        if profile is None:
+            return Response(
+                {"message": "User profile not found."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        user_role = profile.name.strip().lower()
+
+        # Allow only superadmin and client
+        if user_role not in ["superadmin", "client"]:
+            return Response(
+                {"message": "You can only access your own data."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Get clients from User model
         clients = User.objects.filter(
-            profiles__name="client"
+            profiles__name__iexact="client"
         )
 
+        # Client can see only their own record
+        if user_role == "client":
+            clients = clients.filter(
+                email__iexact=request.user.email
+            )
+
+
+        # Query parameters
         fname = request.query_params.get("fname")
         lname = request.query_params.get("lname")
         email = request.query_params.get("email")
@@ -972,45 +1286,31 @@ class ClientListCreateAPIView(APIView):
         country = request.query_params.get("country")
         address = request.query_params.get("address")
         client_status = request.query_params.get("status")
-
-        if fname:
-            clients = clients.filter(
-                first_name__icontains=fname
-            )
-
-        if lname:
-            clients = clients.filter(
-                last_name__icontains=lname
-            )
-
-        if email:
-            clients = clients.filter(
-                email__icontains=email
-            )
-
-        if contactno:
-            clients = clients.filter(
-                phone__icontains=contactno
-            )
-
-        if country:
-            clients = clients.filter(
-                country__icontains=country
-            )
-
-        if address:
-            clients = clients.filter(
-                permanent_address__icontains=address
-            )
-
-        if client_status:
-            clients = clients.filter(
-                status__iexact=client_status
-            )
-
-        # General search across multiple fields
         search = request.query_params.get("search")
 
+        # Filters for User model
+        if fname:
+            clients = clients.filter(first_name__icontains=fname)
+
+        if lname:
+            clients = clients.filter(last_name__icontains=lname)
+
+        if email:
+            clients = clients.filter(email__icontains=email)
+
+        if contactno:
+            clients = clients.filter(phone__icontains=contactno)
+
+        if country:
+            clients = clients.filter(country__icontains=country)
+
+        if address:
+            clients = clients.filter(permanent_address__icontains=address)
+
+        if client_status:
+            clients = clients.filter(status__iexact=client_status)
+
+        # General search for User model
         if search:
             clients = clients.filter(
                 Q(first_name__icontains=search)
@@ -1023,24 +1323,80 @@ class ClientListCreateAPIView(APIView):
 
         clients = clients.order_by("id").distinct()
 
+        # Serialize User model clients
+        user_client_data = ClientSerializer(
+            clients,
+            many=True
+        ).data
+
+        # Get emails already migrated into User model
+        user_client_emails = User.objects.filter(
+            profiles__name__iexact="client"
+        ).values_list("email", flat=True)
+
+        # Get only old Client records not already migrated
+        old_clients = Client.objects.exclude(
+            email__in=user_client_emails
+        )
+
+        # Filters for old Client model
+        if fname:
+            old_clients = old_clients.filter(fname__icontains=fname)
+
+        if lname:
+            old_clients = old_clients.filter(lname__icontains=lname)
+
+        if email:
+            old_clients = old_clients.filter(email__icontains=email)
+
+        if contactno:
+            old_clients = old_clients.filter(contactno__icontains=contactno)
+
+        if country:
+            old_clients = old_clients.filter(country__icontains=country)
+
+        if address:
+            old_clients = old_clients.filter(address__icontains=address)
+
+        if client_status:
+            old_clients = old_clients.filter(status__iexact=client_status)
+
+        # General search for old Client model
+        if search:
+            old_clients = old_clients.filter(
+                Q(fname__icontains=search)
+                | Q(lname__icontains=search)
+                | Q(email__icontains=search)
+                | Q(contactno__icontains=search)
+                | Q(country__icontains=search)
+                | Q(address__icontains=search)
+            )
+
+        # Serialize old Client records
+        old_client_data = OldClientSerializer(
+            old_clients,
+            many=True
+        ).data
+
+        # Combine both client lists
+        all_clients = list(user_client_data) + list(old_client_data)
+
+        # Pagination
         paginator = PageNumberPagination()
         paginator.page_size = 100
 
         page = paginator.paginate_queryset(
-            clients,
+            all_clients,
             request,
             view=self
         )
 
-        serializer = ClientSerializer(page, many=True)
-
-        return paginator.get_paginated_response(
-            serializer.data
-        )
+        return paginator.get_paginated_response(page)
 
     def post(self, request):
 
         serializer = ClientSerializer(data=request.data)
+
         serializer.is_valid(raise_exception=True)
 
         serializer.save(
@@ -1052,7 +1408,6 @@ class ClientListCreateAPIView(APIView):
             serializer.data,
             status=status.HTTP_201_CREATED,
         )
-
 
 
 class ClientDetailAPIView(APIView):
@@ -1240,8 +1595,15 @@ class ProjectListCreateView(generics.ListCreateAPIView):
       
         if user_role in ["superadmin", "admin"]:
             pass
+
         elif user_role == "manager":
             projects = projects.filter(manager=user)
+
+        elif user_role == "client":
+            projects = projects.filter(
+                client__email__iexact=user.email
+            )
+
         else:
             return Project.objects.none()
 
@@ -1674,6 +2036,27 @@ class ProjectDetailView(APIView):
         )
 
     def patch(self, request, pk):
+
+        # Delete project
+        if request.data.get("action") == "delete":
+
+            check_delete_permission(request)
+
+            project = self.get_object(pk)
+
+            project.is_deleted = True
+            project.updated_by = request.user
+
+            project.save(
+                update_fields=["is_deleted", "updated_by", "updated_at"]
+            )
+
+            return Response(
+                {"message": "Project deleted successfully."},
+                status=status.HTTP_200_OK
+            )
+
+        # Normal project update
         project = self.get_object(pk)
 
         serializer = self.serializer_class(
@@ -1681,6 +2064,7 @@ class ProjectDetailView(APIView):
             data=request.data,
             partial=True
         )
+
         serializer.is_valid(raise_exception=True)
         serializer.save(updated_by=request.user)
 

@@ -1,0 +1,14 @@
+$kind: http-request
+url: http://127.0.0.1:8000/api/users/62/
+method: PUT
+body:
+  type: json
+  content: |-
+    {
+        "first_name": "yash"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{json_web_token_1byk}}"
+order: 15000

@@ -13,6 +13,29 @@ class Profile(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     def __str__(self):
         return self.name
+    
+class ProjectType(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class ProjectStatus(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class ProjectTaskStatus(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
 
 class BaseModel(models.Model):
 
@@ -39,7 +62,7 @@ class BaseModel(models.Model):
     class Meta:
         abstract = True
 
-# Custom User Model
+# User Model
 
 class User(AbstractUser,BaseModel):
 
@@ -226,70 +249,51 @@ class Client(BaseModel):
 
 class Project(BaseModel):
 
-    class ProjectType(models.TextChoices):
-        WEB = "Web", "Web"
-        MOBILE = "Mobile", "Mobile"
-        SOFTWARE = "Software", "Software"
-        DATA = "Data", "Data"
-        OTHER = "Other", "Other"
-
-    class ProjectStatus(models.TextChoices):
-        NOT_STARTED = "Not Started", "Not Started"
-        IN_PROGRESS = "In Progress", "In Progress"
-        COMPLETED = "Completed", "Completed"
-        ON_HOLD = "On Hold", "On Hold"
-        CANCELLED = "Cancelled", "Cancelled"
-
     title = models.CharField(max_length=200, unique=True)
-    
+
     description = models.TextField(
-    null=True,
-    blank=True,
-)
+        null=True,
+        blank=True,
+    )
 
     type = models.CharField(
-        max_length=20,
-        choices=ProjectType.choices,
-        default=ProjectType.OTHER,
+        max_length=100,
+        default="Other",
     )
 
     date_of_completion = models.DateField(null=True, blank=True)
 
     status = models.CharField(
-        max_length=20,
-        choices=ProjectStatus.choices,
-        default=ProjectStatus.NOT_STARTED,
+        max_length=100,
+        default="Not Started",
     )
 
     client = models.ForeignKey(
-    "users.Client",
-    on_delete=models.SET_NULL,
-    related_name="projects",
-    null=True,
-    blank=True,
-)
+        "users.Client",
+        on_delete=models.SET_NULL,
+        related_name="projects",
+        null=True,
+        blank=True,
+    )
+
     manager = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="managed_projects",
     )
 
-    
     is_deleted = models.BooleanField(default=False)
-
+    deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="projects_deleted",
+        related_name="deleted_projects"
     )
 
-    deleted_at = models.DateTimeField(null=True, blank=True)
-
     def __str__(self):
-        return self.title
-
+            return self.title
 class ProjectAttachement(models.Model):
     project = models.ForeignKey(
         Project,
@@ -364,10 +368,9 @@ class ProjectTask(models.Model):
         )
 
     status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default="PENDING",
-    )
+    max_length=100,
+    default="Pending",
+)
     is_deleted = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
